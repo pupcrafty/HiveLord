@@ -245,19 +245,8 @@ class HiveLordApp:
         message = "🚀 System online - Wiring phase initialized"
         
         print("[MAIN DEBUG] ===== SENDING SYSTEM ONLINE MESSAGE =====")
-        if self.discord_bot:
-            print("[MAIN DEBUG] Discord bot exists, sending message...")
-            try:
-                await self.discord_bot.send_message(message)
-                print("[MAIN DEBUG] Discord message send completed")
-            except Exception as e:
-                print(f"[MAIN DEBUG] ERROR sending Discord message: {type(e).__name__}: {e}")
-                import traceback
-                traceback.print_exc()
-                log_error("main", e, {"action": "send_system_online", "channel": "discord"})
-        else:
-            print("[MAIN DEBUG] Discord bot is None, skipping Discord message")
-        
+        # Discord message is sent automatically via on_ready callback (registered in startup)
+        # Only send to Telegram here
         if self.telegram_bot:
             try:
                 await self.telegram_bot.send_message(message)
@@ -305,10 +294,10 @@ class HiveLordApp:
                 if bot.is_enabled():
                     print("[MAIN DEBUG] Bot is enabled, starting bot...")
                     self.discord_bot = bot
+                    # Register the first message to be sent when ready
+                    self.discord_bot.register_first_message("🚀 System online - Wiring phase initialized")
                     await self.discord_bot.start()
-                    print("[MAIN DEBUG] Bot start() called, waiting 2 seconds for connection...")
-                    await asyncio.sleep(2.0)  # Wait for bot to connect
-                    print(f"[MAIN DEBUG] Wait complete. Bot ready status: {self.discord_bot.bot.is_ready() if self.discord_bot.bot else 'No bot instance'}")
+                    print("[MAIN DEBUG] Bot start() called, bot will send message when on_ready fires")
                     self.module_status["discord"] = "active"
                     log_event(source="main", event_type="discord_bot_started", payload={})
                     print("[MAIN DEBUG] Discord bot marked as active")
@@ -378,7 +367,7 @@ class HiveLordApp:
         await self.initialize_instagram()
         await self.initialize_lovense()
         
-        # 8. Send "System online" to available channels
+        # 8. Send "System online" to available channels (Discord sends via on_ready callback)
         await self.send_system_online()
         
         # 9. Start scheduler (always available)

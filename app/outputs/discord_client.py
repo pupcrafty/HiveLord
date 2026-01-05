@@ -19,6 +19,9 @@ class DiscordBot:
         self.bot: Optional[commands.Bot] = None
         self.user_id: Optional[int] = None
         self._initialized = False
+        self._ready = False
+        self._ready_event = asyncio.Event()
+        self._first_message: Optional[str] = None
     
     def is_enabled(self) -> bool:
         """Check if Discord bot is enabled and has required configuration."""
@@ -60,6 +63,19 @@ class DiscordBot:
         print(f"[DISCORD DEBUG] Bot exists: {self.bot is not None}")
         if self.bot:
             print(f"[DISCORD DEBUG] Bot is_ready(): {self.bot.is_ready()}")
+            print(f"[DISCORD DEBUG] Internal _ready flag: {self._ready}")
+        
+        # Wait for bot to be ready (on_ready event fired)
+        if not self._ready:
+            print("[DISCORD DEBUG] Bot not ready yet, waiting for on_ready event...")
+            try:
+                await asyncio.wait_for(self._ready_event.wait(), timeout=30.0)
+                print("[DISCORD DEBUG] Bot ready event received, proceeding with send")
+            except asyncio.TimeoutError:
+                print("[DISCORD DEBUG] ERROR: Timeout waiting for bot to be ready")
+                log_error("discord", "Timeout waiting for bot ready", {"action": "send_message"})
+                return
+        
         if not self.bot or not self.bot.is_ready():
             print("[DISCORD DEBUG] ERROR: Bot not ready - cannot send message")
             log_error("discord", "Bot not ready", {"action": "send_message"})
@@ -92,11 +108,23 @@ class DiscordBot:
         else:
             print("[DISCORD DEBUG] WARNING: Bot user is None")
         print("[DISCORD DEBUG] Bot is_ready() status:", self.bot.is_ready() if self.bot else "N/A")
+        
+        # Mark bot as ready
+        self._ready = True
+        self._ready_event.set()
+        print("[DISCORD DEBUG] Bot ready flag set to True")
+        
         log_event(
             source="discord",
             event_type="bot_ready",
             payload={"user": str(self.bot.user) if self.bot.user else None}
         )
+        
+        # Send first message if one was registered
+        if self._first_message:
+            print(f"[DISCORD DEBUG] Sending first registered message: {self._first_message[:50]}...")
+            await self.send_message(self._first_message)
+            self._first_message = None
     
     async def _on_message(self, message: discord.Message) -> None:
         """Handle incoming messages."""
@@ -179,6 +207,12 @@ class DiscordBot:
         task = asyncio.create_task(self.bot.start(self.settings.discord_bot_token))
         print(f"[DISCORD DEBUG] Bot start task created: {task}")
         print("[DISCORD DEBUG] Bot start() method called - connection in progress...")
+    
+    def register_first_message(self, message: str) -> None:
+        """Register a message to be sent when the bot is ready (in on_ready)."""
+        print(f"[DISCORD DEBUG] register_first_message() called with: {message[:50]}...")
+        self._first_message = message
+        print(f"[DISCORD DEBUG] First message registered. Bot ready: {self._ready}")
     
     async def stop(self) -> None:
         """Stop the Discord bot."""
