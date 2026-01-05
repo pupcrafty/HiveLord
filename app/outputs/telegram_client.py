@@ -28,6 +28,8 @@ class TelegramBot:
     
     def is_enabled(self) -> bool:
         """Check if Telegram bot is enabled (has token and chat ID)."""
+        if not self.settings.enable_telegram:
+            return False
         return bool(self.settings.telegram_bot_token and self.chat_id)
     
     async def send_message(self, message: str) -> None:

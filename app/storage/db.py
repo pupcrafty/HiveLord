@@ -12,8 +12,12 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=ENGINE)
 
 
 def init_db() -> None:
-    """Initialize database tables."""
-    Base.metadata.create_all(bind=ENGINE)
+    """Initialize database tables. May raise exceptions on failure."""
+    try:
+        Base.metadata.create_all(bind=ENGINE)
+    except Exception:
+        # Re-raise to allow caller to handle
+        raise
 
 
 def get_db() -> Session:

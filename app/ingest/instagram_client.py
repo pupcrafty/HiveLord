@@ -14,7 +14,27 @@ class InstagramClient:
     
     def __init__(self):
         self.settings = get_settings()
-        self.client = httpx.Client(timeout=30.0)
+        self.client: Optional[httpx.Client] = None
+        self._initialized = False
+    
+    def is_enabled(self) -> bool:
+        """Check if Instagram client is enabled and has required configuration."""
+        if not self.settings.enable_instagram:
+            return False
+        return bool(
+            self.settings.ig_app_id and 
+            self.settings.ig_app_secret and 
+            self.settings.ig_long_lived_access_token and
+            self.settings.ig_ig_user_id
+        )
+    
+    def _ensure_initialized(self) -> None:
+        """Ensure client is initialized."""
+        if not self._initialized:
+            if not self.is_enabled():
+                raise RuntimeError("Instagram client is not enabled or missing configuration")
+            self.client = httpx.Client(timeout=30.0)
+            self._initialized = True
     
     def _make_request(
         self,
@@ -23,6 +43,7 @@ class InstagramClient:
         params: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Make an API request with logging."""
+        self._ensure_initialized()
         url = f"{self.BASE_URL}{endpoint}"
         
         if params is None:
@@ -77,5 +98,8 @@ class InstagramClient:
     
     def close(self) -> None:
         """Close the HTTP client."""
-        self.client.close()
+        if self.client:
+            self.client.close()
+            self.client = None
+            self._initialized = False
 

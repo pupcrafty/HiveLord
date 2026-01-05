@@ -23,6 +23,15 @@ class LovenseClient:
         self.thread: Optional[threading.Thread] = None
         self._event_callbacks: list[Callable] = []
     
+    def is_enabled(self) -> bool:
+        """Check if Lovense client is enabled and has required configuration."""
+        if not self.settings.enable_lovense:
+            return False
+        return bool(
+            self.settings.lovense_developer_token and 
+            self.settings.lovense_callback_url
+        )
+    
     def add_event_callback(self, callback: Callable) -> None:
         """Add a callback for events."""
         self._event_callbacks.append(callback)
@@ -56,6 +65,9 @@ class LovenseClient:
     
     async def _connect_websocket(self) -> None:
         """Connect to Lovense Events API WebSocket."""
+        if not self.is_enabled():
+            raise RuntimeError("Lovense client is not enabled or missing configuration")
+        
         try:
             # Note: Lovense Events API requires proper authentication
             # This is a simplified connection flow for wiring phase

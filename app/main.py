@@ -3,7 +3,7 @@ import asyncio
 import signal
 import sys
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Dict, Literal
 
 from app.config.settings import get_settings
 from app.core.logger import log_event, log_error
@@ -36,30 +36,50 @@ class HiveLordApp:
         
         # Shutdown flag
         self.shutdown_event = asyncio.Event()
+        
+        # Module status tracking: enabled, disabled, failed, active
+        self.module_status: Dict[str, Literal["enabled", "disabled", "failed", "active"]] = {}
     
-    def start_run(self) -> None:
-        """Start a run record in the database."""
-        db = get_db_sync()
-        try:
-            run = Run(
-                started_at=datetime.now(timezone.utc),
-                version="0.1.0",
-                notes="Wiring phase - initial setup"
-            )
-            db.add(run)
-            db.commit()
-            self.run_id = run.id
+    def start_run(self) -> bool:
+        """Start a run record in the database. Returns True if successful."""
+        if not self.settings.enable_database:
+            self.module_status["database"] = "disabled"
             log_event(
                 source="main",
-                event_type="run_started",
-                payload={"run_id": self.run_id, "version": run.version}
+                event_type="database_disabled",
+                payload={"reason": "enable_database=False"}
             )
+            return False
+        
+        try:
+            db = get_db_sync()
+            try:
+                run = Run(
+                    started_at=datetime.now(timezone.utc),
+                    version="0.1.0",
+                    notes="Wiring phase - initial setup"
+                )
+                db.add(run)
+                db.commit()
+                self.run_id = run.id
+                self.module_status["database"] = "active"
+                log_event(
+                    source="main",
+                    event_type="run_started",
+                    payload={"run_id": self.run_id, "version": run.version}
+                )
+                return True
+            except Exception as e:
+                db.rollback()
+                log_error("main", e, {"action": "start_run"})
+                self.module_status["database"] = "failed"
+                return False
+            finally:
+                db.close()
         except Exception as e:
-            db.rollback()
-            log_error("main", e, {"action": "start_run"})
-            raise
-        finally:
-            db.close()
+            log_error("main", e, {"action": "init_database"})
+            self.module_status["database"] = "failed"
+            return False
     
     def end_run(self) -> None:
         """Mark the run as ended in the database."""
@@ -83,73 +103,160 @@ class HiveLordApp:
         finally:
             db.close()
     
-    async def validate_bluesky(self) -> bool:
-        """Validate Bluesky connection by posting a test message."""
-        try:
-            self.bluesky_client = BlueskyClient()
-            self.bluesky_client.create_session()
-            result = self.bluesky_client.post_message("Hello from API (wiring test)")
+    async def initialize_bluesky(self) -> bool:
+        """Initialize Bluesky client. Returns True if successful."""
+        if not self.settings.enable_bluesky:
+            self.module_status["bluesky"] = "disabled"
             log_event(
                 source="main",
-                event_type="validation_success",
-                payload={"service": "bluesky", "result": str(result)[:200]}
+                event_type="bluesky_disabled",
+                payload={"reason": "enable_bluesky=False"}
+            )
+            return False
+        
+        try:
+            client = BlueskyClient()
+            if not client.is_enabled():
+                self.module_status["bluesky"] = "disabled"
+                log_event(
+                    source="main",
+                    event_type="bluesky_disabled",
+                    payload={"reason": "missing_configuration"}
+                )
+                return False
+            
+            client.create_session()
+            self.bluesky_client = client
+            self.module_status["bluesky"] = "active"
+            log_event(
+                source="main",
+                event_type="bluesky_initialized",
+                payload={}
             )
             return True
         except Exception as e:
-            log_error("main", e, {"service": "bluesky", "action": "validate"})
-            return False
-    
-    async def validate_instagram(self) -> bool:
-        """Validate Instagram connection by fetching account info."""
-        try:
-            self.instagram_client = InstagramClient()
-            result = self.instagram_client.get_account_info()
+            self.module_status["bluesky"] = "failed"
+            log_error("main", e, {"service": "bluesky", "action": "initialize"})
             log_event(
                 source="main",
-                event_type="validation_success",
-                payload={"service": "instagram", "result": str(result)[:200]}
+                event_type="bluesky_failed",
+                payload={"error": str(e)[:200]}
+            )
+            return False
+    
+    async def initialize_instagram(self) -> bool:
+        """Initialize Instagram client. Returns True if successful."""
+        if not self.settings.enable_instagram:
+            self.module_status["instagram"] = "disabled"
+            log_event(
+                source="main",
+                event_type="instagram_disabled",
+                payload={"reason": "enable_instagram=False"}
+            )
+            return False
+        
+        try:
+            client = InstagramClient()
+            if not client.is_enabled():
+                self.module_status["instagram"] = "disabled"
+                log_event(
+                    source="main",
+                    event_type="instagram_disabled",
+                    payload={"reason": "missing_configuration"}
+                )
+                return False
+            
+            # Just initialize, don't validate yet
+            self.instagram_client = client
+            self.module_status["instagram"] = "active"
+            log_event(
+                source="main",
+                event_type="instagram_initialized",
+                payload={}
             )
             return True
         except Exception as e:
-            log_error("main", e, {"service": "instagram", "action": "validate"})
+            self.module_status["instagram"] = "failed"
+            log_error("main", e, {"service": "instagram", "action": "initialize"})
+            log_event(
+                source="main",
+                event_type="instagram_failed",
+                payload={"error": str(e)[:200]}
+            )
             return False
     
-    async def validate_lovense(self) -> bool:
-        """Validate Lovense connection by starting event stream."""
+    async def initialize_lovense(self) -> bool:
+        """Initialize Lovense client. Returns True if successful."""
+        if not self.settings.enable_lovense:
+            self.module_status["lovense"] = "disabled"
+            log_event(
+                source="main",
+                event_type="lovense_disabled",
+                payload={"reason": "enable_lovense=False"}
+            )
+            return False
+        
         try:
-            self.lovense_client = LovenseClient()
-            self.lovense_client.start()
+            client = LovenseClient()
+            if not client.is_enabled():
+                self.module_status["lovense"] = "disabled"
+                log_event(
+                    source="main",
+                    event_type="lovense_disabled",
+                    payload={"reason": "missing_configuration"}
+                )
+                return False
+            
+            client.start()
             # Wait a moment to see if connection succeeds
             await asyncio.sleep(2.0)
             
-            if self.lovense_client.is_connected():
+            if client.is_connected():
+                self.lovense_client = client
+                self.module_status["lovense"] = "active"
                 log_event(
                     source="main",
-                    event_type="validation_success",
-                    payload={"service": "lovense", "status": "connected"}
+                    event_type="lovense_initialized",
+                    payload={"status": "connected"}
                 )
                 return True
             else:
+                # Still mark as active if enabled, connection may be in progress
+                self.lovense_client = client
+                self.module_status["lovense"] = "active"
                 log_event(
                     source="main",
-                    event_type="validation_warning",
-                    payload={"service": "lovense", "status": "not_connected_yet"}
+                    event_type="lovense_initialized",
+                    payload={"status": "connecting"}
                 )
-                # Still return True as connection may be in progress
                 return True
         except Exception as e:
-            log_error("main", e, {"service": "lovense", "action": "validate"})
+            self.module_status["lovense"] = "failed"
+            log_error("main", e, {"service": "lovense", "action": "initialize"})
+            log_event(
+                source="main",
+                event_type="lovense_failed",
+                payload={"error": str(e)[:200]}
+            )
             return False
     
     async def send_system_online(self) -> None:
         """Send 'System online' message to Discord and Telegram."""
         message = "🚀 System online - Wiring phase initialized"
         
+        print("[MAIN DEBUG] ===== SENDING SYSTEM ONLINE MESSAGE =====")
         if self.discord_bot:
+            print("[MAIN DEBUG] Discord bot exists, sending message...")
             try:
                 await self.discord_bot.send_message(message)
+                print("[MAIN DEBUG] Discord message send completed")
             except Exception as e:
+                print(f"[MAIN DEBUG] ERROR sending Discord message: {type(e).__name__}: {e}")
+                import traceback
+                traceback.print_exc()
                 log_error("main", e, {"action": "send_system_online", "channel": "discord"})
+        else:
+            print("[MAIN DEBUG] Discord bot is None, skipping Discord message")
         
         if self.telegram_bot:
             try:
@@ -158,105 +265,223 @@ class HiveLordApp:
                 log_error("main", e, {"action": "send_system_online", "channel": "telegram"})
     
     async def startup(self) -> None:
-        """Startup sequence."""
-        # 1. Initialize database
-        init_db()
-        log_event(source="main", event_type="database_initialized", payload={})
+        """Startup sequence - each module can fail gracefully."""
+        log_event(source="main", event_type="startup_started", payload={})
         
-        # 2. Start run record
-        self.start_run()
+        # 1. Initialize database (optional)
+        if self.settings.enable_database:
+            try:
+                init_db()
+                log_event(source="main", event_type="database_initialized", payload={})
+            except Exception as e:
+                log_error("main", e, {"action": "init_database"})
+                self.module_status["database"] = "failed"
+                log_event(
+                    source="main",
+                    event_type="database_failed",
+                    payload={"error": str(e)[:200]}
+                )
+        else:
+            self.module_status["database"] = "disabled"
         
-        # 3. Initialize logger (already available via imports)
+        # 2. Start run record (if database is available)
+        if self.settings.enable_database:
+            self.start_run()
+        
+        # 3. Initialize logger (always available via imports)
         log_event(source="main", event_type="logger_initialized", payload={})
         
-        # 4. Initialize consent system (already available via imports)
+        # 4. Initialize consent system (always available via imports)
         log_event(source="main", event_type="consent_system_initialized", payload={})
         
-        # 5. Start Discord bot
-        try:
-            self.discord_bot = DiscordBot()
-            await self.discord_bot.start()
-            await asyncio.sleep(2.0)  # Wait for bot to connect
-            log_event(source="main", event_type="discord_bot_started", payload={})
-        except Exception as e:
-            log_error("main", e, {"action": "start_discord_bot"})
-            raise
+        # 5. Start Discord bot (can fail gracefully)
+        print("[MAIN DEBUG] ===== INITIALIZING DISCORD BOT =====")
+        if self.settings.enable_discord:
+            print("[MAIN DEBUG] Discord is enabled in settings")
+            try:
+                print("[MAIN DEBUG] Creating DiscordBot instance...")
+                bot = DiscordBot()
+                print("[MAIN DEBUG] Checking if bot is enabled...")
+                if bot.is_enabled():
+                    print("[MAIN DEBUG] Bot is enabled, starting bot...")
+                    self.discord_bot = bot
+                    await self.discord_bot.start()
+                    print("[MAIN DEBUG] Bot start() called, waiting 2 seconds for connection...")
+                    await asyncio.sleep(2.0)  # Wait for bot to connect
+                    print(f"[MAIN DEBUG] Wait complete. Bot ready status: {self.discord_bot.bot.is_ready() if self.discord_bot.bot else 'No bot instance'}")
+                    self.module_status["discord"] = "active"
+                    log_event(source="main", event_type="discord_bot_started", payload={})
+                    print("[MAIN DEBUG] Discord bot marked as active")
+                else:
+                    print("[MAIN DEBUG] Bot is not enabled (missing configuration)")
+                    self.module_status["discord"] = "disabled"
+                    log_event(
+                        source="main",
+                        event_type="discord_bot_disabled",
+                        payload={"reason": "missing_configuration"}
+                    )
+            except Exception as e:
+                print(f"[MAIN DEBUG] ERROR starting Discord bot: {type(e).__name__}: {e}")
+                import traceback
+                traceback.print_exc()
+                self.module_status["discord"] = "failed"
+                log_error("main", e, {"action": "start_discord_bot"})
+                log_event(
+                    source="main",
+                    event_type="discord_bot_failed",
+                    payload={"error": str(e)[:200]}
+                )
+        else:
+            print("[MAIN DEBUG] Discord is disabled in settings")
+            self.module_status["discord"] = "disabled"
+            log_event(
+                source="main",
+                event_type="discord_bot_disabled",
+                payload={"reason": "enable_discord=False"}
+            )
         
-        # 6. Optionally start Telegram bot
-        try:
-            self.telegram_bot = TelegramBot()
-            if self.telegram_bot.is_enabled():
-                await self.telegram_bot.start()
-                await asyncio.sleep(1.0)  # Wait for bot to connect
-                log_event(source="main", event_type="telegram_bot_started", payload={})
-            else:
-                log_event(source="main", event_type="telegram_bot_disabled", payload={"reason": "not_configured"})
-        except Exception as e:
-            log_error("main", e, {"action": "start_telegram_bot"})
-            # Don't raise - Telegram is optional
+        # 6. Start Telegram bot (can fail gracefully)
+        if self.settings.enable_telegram:
+            try:
+                bot = TelegramBot()
+                if bot.is_enabled():
+                    self.telegram_bot = bot
+                    await self.telegram_bot.start()
+                    await asyncio.sleep(1.0)  # Wait for bot to connect
+                    self.module_status["telegram"] = "active"
+                    log_event(source="main", event_type="telegram_bot_started", payload={})
+                else:
+                    self.module_status["telegram"] = "disabled"
+                    log_event(
+                        source="main",
+                        event_type="telegram_bot_disabled",
+                        payload={"reason": "missing_configuration"}
+                    )
+            except Exception as e:
+                self.module_status["telegram"] = "failed"
+                log_error("main", e, {"action": "start_telegram_bot"})
+                log_event(
+                    source="main",
+                    event_type="telegram_bot_failed",
+                    payload={"error": str(e)[:200]}
+                )
+        else:
+            self.module_status["telegram"] = "disabled"
+            log_event(
+                source="main",
+                event_type="telegram_bot_disabled",
+                payload={"reason": "enable_telegram=False"}
+            )
         
-        # 7. Validate connections
-        log_event(source="main", event_type="validation_started", payload={})
+        # 7. Initialize ingest clients (can fail gracefully)
+        await self.initialize_bluesky()
+        await self.initialize_instagram()
+        await self.initialize_lovense()
         
-        bluesky_ok = await self.validate_bluesky()
-        instagram_ok = await self.validate_instagram()
-        lovense_ok = await self.validate_lovense()
-        
-        log_event(
-            source="main",
-            event_type="validation_complete",
-            payload={
-                "bluesky": bluesky_ok,
-                "instagram": instagram_ok,
-                "lovense": lovense_ok
-            }
-        )
-        
-        # 8. Send "System online" to Discord (and Telegram)
+        # 8. Send "System online" to available channels
         await self.send_system_online()
         
-        # 9. Start scheduler
-        self.scheduler.start()
-        log_event(source="main", event_type="scheduler_started", payload={})
+        # 9. Start scheduler (always available)
+        try:
+            self.scheduler.start()
+            self.module_status["scheduler"] = "active"
+            log_event(source="main", event_type="scheduler_started", payload={})
+        except Exception as e:
+            self.module_status["scheduler"] = "failed"
+            log_error("main", e, {"action": "start_scheduler"})
+            log_event(
+                source="main",
+                event_type="scheduler_failed",
+                payload={"error": str(e)[:200]}
+            )
         
-        log_event(source="main", event_type="startup_complete", payload={})
+        # Log final status
+        log_event(
+            source="main",
+            event_type="startup_complete",
+            payload={"module_status": self.module_status}
+        )
+        
+        # Print status summary
+        print("\n" + "="*60)
+        print("HiveLord Startup Status:")
+        print("="*60)
+        for module, status in self.module_status.items():
+            status_icon = {
+                "active": "✓",
+                "disabled": "-",
+                "failed": "✗"
+            }.get(status, "?")
+            print(f"  {status_icon} {module.upper()}: {status}")
+        print("="*60 + "\n")
     
     async def shutdown(self) -> None:
-        """Shutdown sequence."""
+        """Shutdown sequence - handles missing/failed modules gracefully."""
         log_event(source="main", event_type="shutdown_started", payload={})
         
         # Stop scheduler
-        self.scheduler.stop()
+        try:
+            if self.scheduler:
+                self.scheduler.stop()
+        except Exception as e:
+            log_error("main", e, {"action": "stop_scheduler"})
         
         # Close Lovense connection
-        if self.lovense_client:
-            self.lovense_client.stop()
+        try:
+            if self.lovense_client:
+                self.lovense_client.stop()
+        except Exception as e:
+            log_error("main", e, {"action": "stop_lovense"})
         
         # Stop Telegram bot
-        if self.telegram_bot:
-            await self.telegram_bot.stop()
+        try:
+            if self.telegram_bot:
+                await self.telegram_bot.stop()
+        except Exception as e:
+            log_error("main", e, {"action": "stop_telegram_bot"})
         
         # Stop Discord bot
-        if self.discord_bot:
-            await self.discord_bot.stop()
+        try:
+            if self.discord_bot:
+                await self.discord_bot.stop()
+        except Exception as e:
+            log_error("main", e, {"action": "stop_discord_bot"})
         
         # Close Instagram client
-        if self.instagram_client:
-            self.instagram_client.close()
+        try:
+            if self.instagram_client:
+                self.instagram_client.close()
+        except Exception as e:
+            log_error("main", e, {"action": "close_instagram"})
         
         # Close Bluesky client
-        if self.bluesky_client:
-            self.bluesky_client.close()
+        try:
+            if self.bluesky_client:
+                self.bluesky_client.close()
+        except Exception as e:
+            log_error("main", e, {"action": "close_bluesky"})
         
-        # Mark run ended
-        self.end_run()
+        # Mark run ended (if database is available)
+        if self.settings.enable_database:
+            try:
+                self.end_run()
+            except Exception as e:
+                log_error("main", e, {"action": "end_run"})
         
         log_event(source="main", event_type="shutdown_complete", payload={})
     
     async def run(self) -> None:
-        """Run the application."""
+        """Run the application - startup failures don't crash the app."""
         try:
             await self.startup()
+            
+            # Even if some modules failed, continue running
+            if not any(status == "active" for status in self.module_status.values()):
+                log_event(
+                    source="main",
+                    event_type="warning",
+                    payload={"message": "No modules are active, but continuing..."}
+                )
             
             # Wait for shutdown signal
             await self.shutdown_event.wait()
@@ -264,6 +489,7 @@ class HiveLordApp:
             log_event(source="main", event_type="keyboard_interrupt", payload={})
         except Exception as e:
             log_error("main", e, {"action": "run"})
+            # Don't exit - try to continue
         finally:
             await self.shutdown()
 

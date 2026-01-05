@@ -6,6 +6,7 @@ from typing import Any, Dict
 
 from sqlalchemy.orm import Session
 
+from app.config.settings import get_settings
 from app.storage.db import get_db_sync
 from app.storage.models import Event
 
@@ -35,7 +36,7 @@ def log_event(
     db: Session | None = None
 ) -> None:
     """
-    Log an event to the database.
+    Log an event to the database (if enabled), otherwise prints to console.
     
     Args:
         source: Source of the event (e.g., 'instagram', 'discord', 'lovense')
@@ -43,10 +44,28 @@ def log_event(
         payload: Event payload (will be JSON serialized and redacted)
         db: Optional database session (creates new if not provided)
     """
+    # Check if database is enabled
+    try:
+        settings = get_settings()
+        if not settings.enable_database:
+            # Fallback to console logging
+            payload_str = json.dumps(payload or {}, default=str)
+            print(f"[{source}] {event_type}: {payload_str}")
+            return
+    except Exception:
+        # If settings can't be loaded, continue with database attempt
+        pass
+    
     close_db = False
     if db is None:
-        db = get_db_sync()
-        close_db = True
+        try:
+            db = get_db_sync()
+            close_db = True
+        except Exception:
+            # Database not available, fallback to console
+            payload_str = json.dumps(payload or {}, default=str)
+            print(f"[{source}] {event_type}: {payload_str}")
+            return
     
     try:
         # Prepare payload
@@ -68,22 +87,19 @@ def log_event(
         db.add(event)
         db.commit()
     except Exception as e:
-        db.rollback()
-        # Try to log the error itself
         try:
-            error_event = Event(
-                ts=datetime.now(timezone.utc),
-                source="logger",
-                type="log_error",
-                payload_json=json.dumps({"error": str(e)}, default=str)
-            )
-            db.add(error_event)
-            db.commit()
+            db.rollback()
         except Exception:
             pass
+        # Fallback to console logging on error
+        payload_str = json.dumps(payload or {}, default=str)
+        print(f"[{source}] {event_type} (DB failed): {payload_str}")
     finally:
-        if close_db:
-            db.close()
+        if close_db and db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def log_api_request(source: str, method: str, url: str, status_code: int | None = None) -> None:

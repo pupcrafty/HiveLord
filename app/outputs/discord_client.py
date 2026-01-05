@@ -18,32 +18,80 @@ class DiscordBot:
         self.settings = get_settings()
         self.bot: Optional[commands.Bot] = None
         self.user_id: Optional[int] = None
-        
-        # Parse user ID
+        self._initialized = False
+    
+    def is_enabled(self) -> bool:
+        """Check if Discord bot is enabled and has required configuration."""
+        print("[DISCORD DEBUG] Checking if Discord bot is enabled...")
+        if not self.settings.enable_discord:
+            print("[DISCORD DEBUG] Discord is disabled (enable_discord=False)")
+            return False
+        if not (self.settings.discord_bot_token and self.settings.discord_user_id):
+            print("[DISCORD DEBUG] Discord missing configuration (token or user_id)")
+            return False
         try:
-            self.user_id = int(self.settings.discord_user_id)
-        except (ValueError, AttributeError):
-            raise ValueError(f"Invalid DISCORD_USER_ID: {self.settings.discord_user_id}")
+            int(self.settings.discord_user_id)
+            print("[DISCORD DEBUG] Discord bot is enabled and configured")
+            return True
+        except (ValueError, TypeError):
+            print(f"[DISCORD DEBUG] Invalid user_id: {self.settings.discord_user_id}")
+            return False
+    
+    def _ensure_initialized(self) -> None:
+        """Ensure bot is initialized."""
+        print("[DISCORD DEBUG] Ensuring Discord bot is initialized...")
+        if not self._initialized:
+            if not self.is_enabled():
+                print("[DISCORD DEBUG] ERROR: Discord bot is not enabled or missing configuration")
+                raise RuntimeError("Discord bot is not enabled or missing configuration")
+            # Parse user ID
+            try:
+                self.user_id = int(self.settings.discord_user_id)
+                print(f"[DISCORD DEBUG] Parsed user_id: {self.user_id}")
+            except (ValueError, AttributeError):
+                print(f"[DISCORD DEBUG] ERROR: Invalid DISCORD_USER_ID: {self.settings.discord_user_id}")
+                raise ValueError(f"Invalid DISCORD_USER_ID: {self.settings.discord_user_id}")
+            self._initialized = True
+            print("[DISCORD DEBUG] Discord bot initialized successfully")
     
     async def send_message(self, message: str) -> None:
         """Send a DM to the configured user."""
+        print(f"[DISCORD DEBUG] send_message() called with message: {message[:50]}...")
+        print(f"[DISCORD DEBUG] Bot exists: {self.bot is not None}")
+        if self.bot:
+            print(f"[DISCORD DEBUG] Bot is_ready(): {self.bot.is_ready()}")
         if not self.bot or not self.bot.is_ready():
+            print("[DISCORD DEBUG] ERROR: Bot not ready - cannot send message")
             log_error("discord", "Bot not ready", {"action": "send_message"})
             return
         
         try:
+            print(f"[DISCORD DEBUG] Fetching user with ID: {self.user_id}")
             user = await self.bot.fetch_user(self.user_id)
+            print(f"[DISCORD DEBUG] User fetched: {user.name}#{user.discriminator} (ID: {user.id})")
+            print(f"[DISCORD DEBUG] Attempting to send DM to user...")
             await user.send(message)
+            print(f"[DISCORD DEBUG] Message sent successfully!")
             log_message_sent("discord", str(self.user_id), message[:100])
-        except discord.Forbidden:
+        except discord.Forbidden as e:
+            print(f"[DISCORD DEBUG] ERROR: Cannot send DM (forbidden) - {e}")
             log_error("discord", "Cannot send DM (forbidden)", {"user_id": self.user_id})
         except discord.HTTPException as e:
+            print(f"[DISCORD DEBUG] ERROR: HTTPException - {e}")
             log_error("discord", e, {"action": "send_message", "user_id": self.user_id})
         except Exception as e:
+            print(f"[DISCORD DEBUG] ERROR: Unexpected error - {type(e).__name__}: {e}")
             log_error("discord", e, {"action": "send_message"})
     
     async def _on_ready(self) -> None:
         """Called when bot is ready."""
+        print("[DISCORD DEBUG] ===== BOT READY EVENT FIRED =====")
+        if self.bot and self.bot.user:
+            print(f"[DISCORD DEBUG] Bot user: {self.bot.user.name}#{self.bot.user.discriminator}")
+            print(f"[DISCORD DEBUG] Bot ID: {self.bot.user.id}")
+        else:
+            print("[DISCORD DEBUG] WARNING: Bot user is None")
+        print("[DISCORD DEBUG] Bot is_ready() status:", self.bot.is_ready() if self.bot else "N/A")
         log_event(
             source="discord",
             event_type="bot_ready",
@@ -104,25 +152,41 @@ class DiscordBot:
     
     async def start(self) -> None:
         """Start the Discord bot."""
+        print("[DISCORD DEBUG] ===== STARTING DISCORD BOT =====")
+        self._ensure_initialized()
+        print("[DISCORD DEBUG] Creating bot with intents...")
         intents = discord.Intents.default()
         intents.message_content = True
         intents.dm_messages = True
+        print(f"[DISCORD DEBUG] Intents configured - message_content: {intents.message_content}, dm_messages: {intents.dm_messages}")
         
+        print("[DISCORD DEBUG] Creating commands.Bot instance...")
         self.bot = commands.Bot(command_prefix="!", intents=intents)
+        print("[DISCORD DEBUG] Bot instance created")
         
         @self.bot.event
         async def on_ready():
+            print("[DISCORD DEBUG] on_ready event handler called")
             await self._on_ready()
         
         @self.bot.event
         async def on_message(message: discord.Message):
+            print(f"[DISCORD DEBUG] on_message event - from: {message.author.name}, content: {message.content[:50]}")
             await self._on_message(message)
         
+        print(f"[DISCORD DEBUG] Starting bot with token (length: {len(self.settings.discord_bot_token) if self.settings.discord_bot_token else 0})...")
         # Start bot in background task
-        asyncio.create_task(self.bot.start(self.settings.discord_bot_token))
+        task = asyncio.create_task(self.bot.start(self.settings.discord_bot_token))
+        print(f"[DISCORD DEBUG] Bot start task created: {task}")
+        print("[DISCORD DEBUG] Bot start() method called - connection in progress...")
     
     async def stop(self) -> None:
         """Stop the Discord bot."""
+        print("[DISCORD DEBUG] Stopping Discord bot...")
         if self.bot:
+            print("[DISCORD DEBUG] Closing bot connection...")
             await self.bot.close()
+            print("[DISCORD DEBUG] Bot closed")
+        else:
+            print("[DISCORD DEBUG] No bot instance to close")
 

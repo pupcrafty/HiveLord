@@ -13,8 +13,23 @@ class BlueskyClient:
     
     def __init__(self):
         self.settings = get_settings()
-        self.client = httpx.Client(timeout=30.0)
+        self.client: Optional[httpx.Client] = None
         self.session: Optional[Dict[str, Any]] = None
+        self._initialized = False
+    
+    def is_enabled(self) -> bool:
+        """Check if Bluesky client is enabled and has required configuration."""
+        if not self.settings.enable_bluesky:
+            return False
+        return bool(self.settings.bsky_handle and self.settings.bsky_app_password)
+    
+    def _ensure_initialized(self) -> None:
+        """Ensure client is initialized."""
+        if not self._initialized:
+            if not self.is_enabled():
+                raise RuntimeError("Bluesky client is not enabled or missing configuration")
+            self.client = httpx.Client(timeout=30.0)
+            self._initialized = True
     
     def _get_pds_url(self) -> str:
         """Get the PDS base URL."""
@@ -27,6 +42,7 @@ class BlueskyClient:
         Returns:
             Session information including accessJwt and refreshJwt
         """
+        self._ensure_initialized()
         url = f"{self._get_pds_url()}/xrpc/com.atproto.server.createSession"
         
         payload = {
@@ -71,6 +87,7 @@ class BlueskyClient:
         Returns:
             Created record information
         """
+        self._ensure_initialized()
         if not repo:
             repo = self.settings.bsky_handle
         
@@ -119,5 +136,8 @@ class BlueskyClient:
     
     def close(self) -> None:
         """Close the HTTP client."""
-        self.client.close()
+        if self.client:
+            self.client.close()
+            self.client = None
+            self._initialized = False
 
