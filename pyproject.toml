@@ -1,0 +1,24 @@
+[project]
+name = "hivelord"
+version = "0.1.0"
+description = "Authority-Driven Multi-API System - Initial Wiring Phase"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.25.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "sqlalchemy>=2.0.0",
+    "discord.py>=2.3.0",
+    "python-telegram-bot>=20.0",
+    "websockets>=12.0",
+    "rich>=13.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app"]
+
