@@ -3,7 +3,7 @@ import asyncio
 import signal
 import sys
 from datetime import datetime, timezone
-from typing import Optional, Dict, Literal
+from typing import Optional, Dict, Literal, Tuple
 
 import httpx
 
@@ -37,6 +37,9 @@ class HiveLordApp:
         
         # Module status tracking: enabled, disabled, failed, active
         self.module_status: Dict[str, Literal["enabled", "disabled", "failed", "active"]] = {}
+        
+        # Test event tracking
+        self._test_event_triggered = False
     
     def start_run(self) -> bool:
         """Start a run record in the database. Returns True if successful."""
@@ -386,6 +389,9 @@ class HiveLordApp:
                 payload={"error": str(e)[:200]}
             )
         
+        # 10. Setup test event handler (runs once when both Discord and Bluesky are ready)
+        asyncio.create_task(self._setup_test_event_handler())
+        
         # Log final status
         log_event(
             source="main",
@@ -405,6 +411,105 @@ class HiveLordApp:
             }.get(status, "?")
             print(f"  {status_icon} {module.upper()}: {status}")
         print("="*60 + "\n")
+    
+    async def _setup_test_event_handler(self) -> None:
+        """
+        Setup test event handler that runs once when both Discord and Bluesky are ready.
+        This is a temporary test pipeline for image posting.
+        """
+        print("[MAIN DEBUG] Setting up test event handler...")
+        
+        # Wait for both services to be ready
+        max_wait = 60.0  # Wait up to 60 seconds
+        start_time = asyncio.get_event_loop().time()
+        
+        while True:
+            discord_ready = (
+                self.discord_bot is not None
+                and self.discord_bot._ready
+                and self.module_status.get("discord") == "active"
+            )
+            bluesky_ready = (
+                self.bluesky_client is not None
+                and self.bluesky_client.session is not None
+                and self.module_status.get("bluesky") == "active"
+            )
+            
+            if discord_ready and bluesky_ready:
+                print("[MAIN DEBUG] Both Discord and Bluesky are ready!")
+                if not self._test_event_triggered:
+                    self._test_event_triggered = True
+                    await self._trigger_test_event()
+                break
+            
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if elapsed >= max_wait:
+                print(f"[MAIN DEBUG] Timeout waiting for services to be ready (waited {elapsed:.1f}s)")
+                print(f"[MAIN DEBUG] Discord ready: {discord_ready}, Bluesky ready: {bluesky_ready}")
+                break
+            
+            await asyncio.sleep(1.0)
+    
+    async def _trigger_test_event(self) -> None:
+        """
+        Trigger the test event: ask for a picture and set up image handler.
+        """
+        print("[MAIN DEBUG] ===== TRIGGERING TEST EVENT =====")
+        
+        # Ask for a picture via Discord
+        try:
+            await self.discord_bot.send_message("📸 Test event: Please send me a picture!")
+            print("[MAIN DEBUG] Asked for picture via Discord")
+        except Exception as e:
+            print(f"[MAIN DEBUG] ERROR asking for picture: {type(e).__name__}: {e}")
+            log_error("main", e, {"action": "trigger_test_event"})
+            return
+        
+        # Set up image callback
+        async def handle_image(message: discord.Message, image_data: Tuple[bytes, str]) -> None:
+            """Handle image received from Discord and post to Bluesky."""
+            print("[MAIN DEBUG] ===== HANDLING IMAGE FROM DISCORD =====")
+            image_bytes, content_type = image_data
+            print(f"[MAIN DEBUG] Image size: {len(image_bytes)} bytes, type: {content_type}")
+            
+            try:
+                # Upload image blob to Bluesky
+                print("[MAIN DEBUG] Uploading image blob to Bluesky...")
+                blob_result = self.bluesky_client.upload_blob(image_bytes, content_type)
+                print("[MAIN DEBUG] Image blob uploaded successfully")
+                
+                # Create post with image
+                print("[MAIN DEBUG] Creating post with image on Bluesky...")
+                post_text = "📸 Image received from Discord test event"
+                images = [{
+                    "blob": blob_result.get("blob", {}),
+                    "alt": "Image received from Discord test event"
+                }]
+                
+                post_result = self.bluesky_client.create_image_post(post_text, images)
+                print("[MAIN DEBUG] Image post created successfully!")
+                
+                # Confirm via Discord
+                await message.channel.send("✅ Image posted to Bluesky successfully!")
+                log_event(
+                    source="main",
+                    event_type="test_image_posted",
+                    payload={"bluesky_post_uri": post_result.get("uri", "unknown")}
+                )
+            except Exception as e:
+                print(f"[MAIN DEBUG] ERROR posting image to Bluesky: {type(e).__name__}: {e}")
+                import traceback
+                traceback.print_exc()
+                log_error("main", e, {"action": "handle_image"})
+                try:
+                    await message.channel.send(f"❌ Error posting to Bluesky: {str(e)}")
+                except:
+                    pass
+        
+        # Register the callback
+        self.discord_bot.set_image_callback(handle_image)
+        print("[MAIN DEBUG] Image callback registered")
+        log_event(source="main", event_type="test_event_triggered", payload={})
     
     async def shutdown(self) -> None:
         """Shutdown sequence - handles missing/failed modules gracefully."""

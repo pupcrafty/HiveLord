@@ -1,6 +1,6 @@
 """Bluesky AT Protocol client."""
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 import httpx
 
@@ -150,7 +150,7 @@ class BlueskyClient:
         
         Args:
             text: Post text content
-            repo: Repository (handle), defaults to settings handle
+            repo: Repository (DID or handle), defaults to session DID
             
         Returns:
             Created record information
@@ -158,8 +158,15 @@ class BlueskyClient:
         print(f"[BLUESKY DEBUG] ===== CREATING RECORD =====")
         print(f"[BLUESKY DEBUG] Text preview: {text[:50]}...")
         self._ensure_initialized()
+        
+        # Use DID from session if available, otherwise fall back to handle
         if not repo:
-            repo = self.settings.bsky_handle
+            if self.session and "did" in self.session:
+                repo = self.session["did"]
+                print(f"[BLUESKY DEBUG] Using DID from session: {repo}")
+            else:
+                repo = self.settings.bsky_handle
+                print(f"[BLUESKY DEBUG] Using handle (no DID in session): {repo}")
         print(f"[BLUESKY DEBUG] Repository: {repo}")
         
         url = f"{self._get_pds_url()}/xrpc/com.atproto.repo.createRecord"
@@ -212,6 +219,174 @@ class BlueskyClient:
             Created post information
         """
         return self.create_record(text)
+    
+    def upload_blob(self, image_data: bytes, content_type: str = "image/jpeg") -> Dict[str, Any]:
+        """
+        Upload an image blob to Bluesky.
+        
+        Args:
+            image_data: Image file bytes
+            content_type: MIME type (image/jpeg, image/png, image/webp)
+            
+        Returns:
+            Blob reference with CID and other metadata
+        """
+        print(f"[BLUESKY DEBUG] ===== UPLOADING IMAGE BLOB =====")
+        print(f"[BLUESKY DEBUG] Image size: {len(image_data)} bytes")
+        print(f"[BLUESKY DEBUG] Content type: {content_type}")
+        self._ensure_initialized()
+        
+        url = f"{self._get_pds_url()}/xrpc/com.atproto.repo.uploadBlob"
+        print(f"[BLUESKY DEBUG] Upload blob URL: {url}")
+        
+        try:
+            headers = self._get_auth_headers()
+            # Set Content-Type to the actual image MIME type (NOT multipart/form-data)
+            headers["Content-Type"] = content_type
+            
+            print("[BLUESKY DEBUG] Sending POST request to upload blob as raw bytes...")
+            log_api_request("bluesky", "POST", url)
+            
+            # Upload as raw bytes with Content-Type header (NOT multipart form data)
+            response = self.client.post(
+                url,
+                headers=headers,
+                content=image_data
+            )
+            print(f"[BLUESKY DEBUG] Response received - Status: {response.status_code}")
+            log_api_response("bluesky", response.status_code)
+            
+            response.raise_for_status()
+            result = response.json()
+            print("[BLUESKY DEBUG] Blob uploaded successfully!")
+            if "blob" in result:
+                blob_obj = result["blob"]
+                print(f"[BLUESKY DEBUG] Blob object keys: {list(blob_obj.keys()) if isinstance(blob_obj, dict) else 'not a dict'}")
+                print(f"[BLUESKY DEBUG] UPLOAD returned mimeType: {blob_obj.get('mimeType')}")
+                print(f"[BLUESKY DEBUG] UPLOAD returned size: {blob_obj.get('size')}")
+                
+                if isinstance(blob_obj, dict) and "ref" in blob_obj:
+                    print(f"[BLUESKY DEBUG] Blob CID: {blob_obj['ref'].get('$link', 'N/A')}")
+                print(f"[BLUESKY DEBUG] Full blob object: {blob_obj}")
+            print(f"[BLUESKY DEBUG] Full upload result: {result}")
+            return result
+        except httpx.HTTPError as e:
+            print(f"[BLUESKY DEBUG] ERROR uploading blob: {type(e).__name__}: {e}")
+            log_error("bluesky", e, {"action": "uploadBlob", "size": len(image_data)})
+            raise
+    
+    def create_image_post(
+        self,
+        text: str,
+        images: List[Dict[str, Any]],
+        repo: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Create a post with embedded images on Bluesky.
+        
+        Args:
+            text: Post text content
+            images: List of image dicts, each with:
+                - blob: The blob reference from upload_blob (should be the blob object from response)
+                - alt: Alt text for the image (optional)
+            repo: Repository (DID or handle), defaults to session DID
+            
+        Returns:
+            Created record information
+        """
+        print(f"[BLUESKY DEBUG] ===== CREATING IMAGE POST =====")
+        print(f"[BLUESKY DEBUG] Text preview: {text[:50]}...")
+        print(f"[BLUESKY DEBUG] Number of images: {len(images)}")
+        self._ensure_initialized()
+        
+        # Use DID from session if available, otherwise fall back to handle
+        if not repo:
+            if self.session and "did" in self.session:
+                repo = self.session["did"]
+                print(f"[BLUESKY DEBUG] Using DID from session: {repo}")
+            else:
+                repo = self.settings.bsky_handle
+                print(f"[BLUESKY DEBUG] Using handle (no DID in session): {repo}")
+        print(f"[BLUESKY DEBUG] Repository: {repo}")
+        
+        url = f"{self._get_pds_url()}/xrpc/com.atproto.repo.createRecord"
+        print(f"[BLUESKY DEBUG] Create record URL: {url}")
+        
+        collection = "app.bsky.feed.post"
+        
+        # Build embedded images array
+        embedded_images = []
+        for idx, img in enumerate(images):
+            blob_obj = img.get("blob", {})
+            alt_text = img.get("alt", "")
+            
+            # Log blob structure for debugging
+            print(f"[BLUESKY DEBUG] Image {idx + 1} blob keys: {list(blob_obj.keys()) if isinstance(blob_obj, dict) else 'not a dict'}")
+            
+            if not blob_obj:
+                raise ValueError(f"Image {idx + 1} missing blob reference")
+            
+            embedded_images.append({
+                "image": blob_obj,
+                "alt": alt_text
+            })
+        
+        payload = {
+            "repo": repo,
+            "collection": collection,
+            "record": {
+                "$type": "app.bsky.feed.post",
+                "text": text,
+                "embed": {
+                    "$type": "app.bsky.embed.images",
+                    "images": embedded_images
+                },
+                "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            }
+        }
+        print(f"[BLUESKY DEBUG] Payload prepared with {len(embedded_images)} embedded images")
+        
+        try:
+            print("[BLUESKY DEBUG] Sending POST request to create record...")
+            log_api_request("bluesky", "POST", url)
+            headers = self._get_auth_headers()
+            response = self.client.post(
+                url,
+                json=payload,
+                headers=headers
+            )
+            print(f"[BLUESKY DEBUG] Response received - Status: {response.status_code}")
+            log_api_response("bluesky", response.status_code)
+            
+            # Check for errors and log response details
+            if response.status_code >= 400:
+                error_detail = None
+                try:
+                    error_detail = response.json()
+                    print(f"[BLUESKY DEBUG] Error response (JSON): {error_detail}")
+                except Exception:
+                    error_detail = {"text": response.text[:500] if response.text else "No response body"}
+                    print(f"[BLUESKY DEBUG] Error response (text): {error_detail}")
+                print(f"[BLUESKY DEBUG] Payload sent: {payload}")
+                log_error("bluesky", f"HTTP {response.status_code}", {
+                    "action": "createImagePost",
+                    "text_preview": text[:50],
+                    "error_detail": error_detail,
+                    "payload": payload
+                })
+            
+            response.raise_for_status()
+            result = response.json()
+            print("[BLUESKY DEBUG] Image post created successfully!")
+            return result
+        except httpx.HTTPStatusError as e:
+            # Error details already logged above
+            print(f"[BLUESKY DEBUG] ERROR creating image post: {type(e).__name__}: {e}")
+            raise
+        except httpx.HTTPError as e:
+            print(f"[BLUESKY DEBUG] ERROR creating image post: {type(e).__name__}: {e}")
+            log_error("bluesky", e, {"action": "createImagePost", "text_preview": text[:50]})
+            raise
     
     def close(self) -> None:
         """Close the HTTP client."""

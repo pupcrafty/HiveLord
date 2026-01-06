@@ -1,6 +1,6 @@
 """Discord bot client for DM-based control."""
 import asyncio
-from typing import Optional
+from typing import Optional, List, Tuple, Callable, Awaitable
 
 import discord
 from discord.ext import commands
@@ -22,6 +22,7 @@ class DiscordBot:
         self._ready = False
         self._ready_event = asyncio.Event()
         self._first_message: Optional[str] = None
+        self._image_callback: Optional[Callable[[discord.Message, Tuple[bytes, str]], Awaitable[None]]] = None
     
     def is_enabled(self) -> bool:
         """Check if Discord bot is enabled and has required configuration."""
@@ -176,7 +177,33 @@ class DiscordBot:
                 await message.channel.send(f"❌ Error: {str(e)}")
         
         else:
-            await message.channel.send(f"Unknown command: {content}\nAvailable: ARM, DISARM, SAFE MODE")
+            # Check for image attachments
+            image_data = await self.read_image_from_message(message)
+            if image_data:
+                print("[DISCORD DEBUG] Image detected in message, calling image callback...")
+                if self._image_callback:
+                    try:
+                        await self._image_callback(message, image_data)
+                        await message.channel.send("✅ Image received and processing...")
+                    except Exception as e:
+                        print(f"[DISCORD DEBUG] ERROR in image callback: {type(e).__name__}: {e}")
+                        log_error("discord", e, {"action": "image_callback"})
+                        await message.channel.send(f"❌ Error processing image: {str(e)}")
+                else:
+                    await message.channel.send("⚠️ Image received but no handler configured")
+            else:
+                await message.channel.send(f"Unknown command: {content}\nAvailable: ARM, DISARM, SAFE MODE")
+    
+    def set_image_callback(self, callback: Callable[[discord.Message, Tuple[bytes, str]], Awaitable[None]]) -> None:
+        """
+        Set a callback function to handle image messages.
+        
+        Args:
+            callback: Async function that takes (message, image_data) where
+                     image_data is a tuple of (bytes, content_type)
+        """
+        print("[DISCORD DEBUG] Setting image callback...")
+        self._image_callback = callback
     
     async def start(self) -> None:
         """Start the Discord bot."""
@@ -213,6 +240,42 @@ class DiscordBot:
         print(f"[DISCORD DEBUG] register_first_message() called with: {message[:50]}...")
         self._first_message = message
         print(f"[DISCORD DEBUG] First message registered. Bot ready: {self._ready}")
+    
+    async def read_image_from_message(self, message: discord.Message) -> Optional[Tuple[bytes, str]]:
+        """
+        Read an image from a Discord message attachment.
+        
+        Args:
+            message: Discord message object
+            
+        Returns:
+            Tuple of (image_bytes, content_type) if image found, None otherwise
+        """
+        print("[DISCORD DEBUG] Reading image from message...")
+        if not message.attachments:
+            print("[DISCORD DEBUG] No attachments in message")
+            return None
+        
+        # Find first image attachment
+        for attachment in message.attachments:
+            # Check if it's an image
+            if attachment.content_type and attachment.content_type.startswith("image/"):
+                print(f"[DISCORD DEBUG] Found image attachment: {attachment.filename}")
+                print(f"[DISCORD DEBUG] Content type: {attachment.content_type}")
+                print(f"[DISCORD DEBUG] Size: {attachment.size} bytes")
+                
+                try:
+                    # Download the image
+                    image_bytes = await attachment.read()
+                    print(f"[DISCORD DEBUG] Downloaded {len(image_bytes)} bytes")
+                    return (image_bytes, attachment.content_type)
+                except Exception as e:
+                    print(f"[DISCORD DEBUG] ERROR downloading image: {type(e).__name__}: {e}")
+                    log_error("discord", e, {"action": "read_image", "filename": attachment.filename})
+                    return None
+        
+        print("[DISCORD DEBUG] No image attachments found")
+        return None
     
     async def stop(self) -> None:
         """Stop the Discord bot."""
