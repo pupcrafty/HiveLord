@@ -17,6 +17,17 @@ from app.ai.prompt import SYSTEM_INSTRUCTION
 
 class DomBot:
     """Dom Bot controller using OpenAI Responses API."""
+
+    _DISALLOWED_PHRASES = (
+        "would you like",
+        "do you want me to",
+        "i can help",
+    )
+    _REWRITE_PATTERNS = (
+        (re.compile(r"^\s*would you like(?: me)? to (?P<rest>.+)$", re.IGNORECASE), "Please {rest}."),
+        (re.compile(r"^\s*do you want me to (?P<rest>.+)$", re.IGNORECASE), "Please {rest}."),
+        (re.compile(r"^\s*i can help(?: you)?(?: with)? (?P<rest>.+)$", re.IGNORECASE), "Please {rest}."),
+    )
     
     def __init__(self, discord_bot=None, bluesky_client=None):
         self.settings = get_settings()
@@ -39,6 +50,28 @@ class DomBot:
         """Validate that tool name is in allowlist."""
         return tool_name in self.tool_names
 
+    def _rewrite_disallowed_phrasing(self, message: str) -> tuple[str, bool, str | None]:
+        """Rewrite disallowed phrasing into an imperative sentence."""
+        normalized = message.strip()
+        if not normalized:
+            return message, False, None
+
+        lowered = normalized.lower()
+        if not any(phrase in lowered for phrase in self._DISALLOWED_PHRASES):
+            return message, False, None
+
+        for pattern, template in self._REWRITE_PATTERNS:
+            match = pattern.match(normalized)
+            if match:
+                rest = match.group("rest").strip().rstrip("?.!")
+                rest = rest.rstrip(".")
+                if rest:
+                    rewritten = template.format(rest=rest)
+                else:
+                    rewritten = "Tell me what you need."
+                return rewritten, True, "pattern_match"
+
+        return "Tell me what you need.", True, "phrase_detected"
     @staticmethod
     def _has_time_reference(user_text: str) -> bool:
         """Check whether the user specified a time of day."""
@@ -312,6 +345,21 @@ class DomBot:
                         actions=[],
                         needs_followup=False
                     )
+
+                rewritten_message, was_rewritten, reason = self._rewrite_disallowed_phrasing(
+                    final_response.message
+                )
+                if was_rewritten:
+                    log_event(
+                        source="dom_bot",
+                        event_type="response_rewrite",
+                        payload={
+                            "reason": reason,
+                            "original_message": final_response.message,
+                            "rewritten_message": rewritten_message,
+                        },
+                    )
+                    final_response.message = rewritten_message
                 
                 # Build actions from tool calls
                 actions = []
