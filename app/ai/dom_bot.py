@@ -197,10 +197,12 @@ class DomBot:
                 content = message.content
                 if not content:
                     return DomBotResponse(
-                        message="I need to process your request. Please try again.",
+                        message=(
+                            "Proceeding with the default assumption that you want a Discord message "
+                            "sent now to the current channel. Share any changes if needed."
+                        ),
                         actions=[],
-                        needs_followup=True,
-                        followup_question="Could you rephrase your request?"
+                        needs_followup=False
                     )
                 
                 # Parse structured JSON response
@@ -252,9 +254,10 @@ class DomBot:
         
         # Max iterations reached
         return DomBotResponse(
-            message="I'm having trouble processing your request. Please try again with more specific instructions.",
+            message=(
+                "Proceeding with the default assumption that you want a Discord message "
+                "sent now to the current channel. Share any changes if needed."
+            ),
             actions=[],
-            needs_followup=True,
-            followup_question="Could you provide more details?"
+            needs_followup=False
         )
-
