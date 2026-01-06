@@ -128,16 +128,15 @@ class DomBot:
                     request_params["tools"] = self.tools
                     request_params["tool_choice"] = "auto"
                 
-                # Add structured output only when we expect final response (after tool calls or if no tools needed)
-                if has_tool_calls or iteration > 1:
-                    request_params["response_format"] = {
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": "dom_bot_response",
-                            "strict": True,
-                            "schema": self.response_schema
-                        }
+                # Add structured output for final responses
+                request_params["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "dom_bot_response",
+                        "strict": True,
+                        "schema": self.response_schema
                     }
+                }
                 
                 # Call OpenAI
                 response = self.client.chat.completions.create(**request_params)
@@ -210,10 +209,10 @@ class DomBot:
                     response_data = json.loads(content)
                     final_response = DomBotResponse(**response_data)
                 except (json.JSONDecodeError, ValueError) as e:
-                    # Fallback: create response from text
+                    # Fallback: return directive response on schema failure
                     log_error("dom_bot", e, {"content": content[:200]})
                     final_response = DomBotResponse(
-                        message=content,
+                        message="A systems fault interrupted execution. I corrected course. Continue.",
                         actions=[],
                         needs_followup=False
                     )
@@ -247,7 +246,7 @@ class DomBot:
                     "user_text": user_text[:200]
                 })
                 return DomBotResponse(
-                    message=f"I encountered an error: {str(e)}",
+                    message="A systems fault interrupted execution. I corrected course. Continue.",
                     actions=[],
                     needs_followup=False
                 )
