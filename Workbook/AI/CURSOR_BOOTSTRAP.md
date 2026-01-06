@@ -10,10 +10,8 @@
 
 This document defines **all steps, structure, rules, and constraints** required to generate a **local-first Python project** that wires together:
 
-* Instagram (official Graph API)
 * Bluesky (AT Protocol, open API)
 * Discord (bot, DM-first control channel)
-* Telegram (optional mirror channel)
 * Lovense (official developer APIs: events first, control gated)
 
 The system **must not**:
@@ -67,13 +65,11 @@ project/
       scheduler.py
 
     ingest/
-      instagram_client.py
       bluesky_client.py
       lovense_client.py
 
     outputs/
       discord_client.py
-      telegram_client.py
 
     storage/
       db.py
@@ -91,7 +87,6 @@ Install and configure the following libraries:
 * `pydantic`
 * `sqlalchemy`
 * `discord.py`
-* `python-telegram-bot`
 * `websockets`
 * `rich` (for readable local logs)
 
@@ -100,15 +95,6 @@ Install and configure the following libraries:
 ## 4. ENVIRONMENT VARIABLES (.env.example)
 
 ```env
-# =====================
-# Instagram (Meta)
-# =====================
-IG_APP_ID=
-IG_APP_SECRET=
-IG_PAGE_ID=
-IG_IG_USER_ID=
-IG_LONG_LIVED_ACCESS_TOKEN=
-
 # =====================
 # Bluesky
 # =====================
@@ -122,12 +108,6 @@ BSKY_PDS_HOST=https://bsky.social
 DISCORD_BOT_TOKEN=
 DISCORD_USER_ID=
 DISCORD_GUILD_ID=
-
-# =====================
-# Telegram
-# =====================
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=
 
 # =====================
 # Lovense
@@ -197,7 +177,7 @@ Implement a logger that:
 
   * API requests (metadata only)
   * API responses (sanitized)
-  * Messages sent to Discord / Telegram
+  * Messages sent to Discord
   * Lovense events
   * Errors
 * Supports replay/debug from DB alone
@@ -216,7 +196,7 @@ Implement a logger that:
 * Consent expires automatically (default: 10 minutes)
 * Implement **SAFE MODE**:
 
-  * Any “SAFE MODE” message from Discord or Telegram:
+  * Any "SAFE MODE" message from Discord:
 
     * Sets `consent_active = false`
     * Clears `armed_until_ts`
@@ -243,26 +223,9 @@ Implement a logger that:
   * `DISARM`
   * `SAFE MODE`
 
-### Telegram (`outputs/telegram_client.py`)
-
-* Mirror Discord output
-* Same command vocabulary
-* Optional enable/disable flag
-
 ---
 
 ## 10. INGEST CLIENTS
-
-### Instagram (`ingest/instagram_client.py`)
-
-* Use official Graph API
-* Implement:
-
-  * Fetch basic account info
-  * Fetch recent media metadata
-* Publishing:
-
-  * Stub only (no auto-post in wiring phase)
 
 ### Bluesky (`ingest/bluesky_client.py`)
 
@@ -309,14 +272,12 @@ On startup:
 3. Initialize logger
 4. Initialize consent system
 5. Start Discord bot
-6. Optionally start Telegram bot
-7. Validate:
+6. Validate:
 
    * Bluesky post
-   * Instagram fetch
    * Lovense event connection
-8. Send “System online” to Discord (and Telegram)
-9. Block until shutdown
+7. Send "System online" to Discord
+8. Block until shutdown
 
 On shutdown:
 
@@ -330,9 +291,7 @@ On shutdown:
 This wiring phase is **complete** when:
 
 * Discord DM works
-* Telegram DM works
 * Bluesky post succeeds
-* Instagram account fetch succeeds
 * Lovense events stream connects
 * All actions are logged to SQLite
 * SAFE MODE reliably disables everything

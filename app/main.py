@@ -5,14 +5,14 @@ import sys
 from datetime import datetime, timezone
 from typing import Optional, Dict, Literal
 
+import httpx
+
 from app.config.settings import get_settings
 from app.core.logger import log_event, log_error
 from app.core.scheduler import get_scheduler
 from app.ingest.bluesky_client import BlueskyClient
-from app.ingest.instagram_client import InstagramClient
 from app.ingest.lovense_client import LovenseClient
 from app.outputs.discord_client import DiscordBot
-from app.outputs.telegram_client import TelegramBot
 from app.storage.db import init_db, get_db_sync
 from app.storage.models import Run
 
@@ -26,8 +26,6 @@ class HiveLordApp:
         
         # Clients
         self.discord_bot: Optional[DiscordBot] = None
-        self.telegram_bot: Optional[TelegramBot] = None
-        self.instagram_client: Optional[InstagramClient] = None
         self.bluesky_client: Optional[BlueskyClient] = None
         self.lovense_client: Optional[LovenseClient] = None
         
@@ -105,7 +103,9 @@ class HiveLordApp:
     
     async def initialize_bluesky(self) -> bool:
         """Initialize Bluesky client. Returns True if successful."""
+        print("[MAIN DEBUG] ===== INITIALIZING BLUESKY CLIENT =====")
         if not self.settings.enable_bluesky:
+            print("[MAIN DEBUG] Bluesky is disabled in settings")
             self.module_status["bluesky"] = "disabled"
             log_event(
                 source="main",
@@ -114,74 +114,116 @@ class HiveLordApp:
             )
             return False
         
+        print("[MAIN DEBUG] Bluesky is enabled in settings")
         try:
+            print("[MAIN DEBUG] Creating BlueskyClient instance...")
             client = BlueskyClient()
+            print("[MAIN DEBUG] Checking if client is enabled...")
             if not client.is_enabled():
+                print("[MAIN DEBUG] Client is not enabled (missing configuration)")
                 self.module_status["bluesky"] = "disabled"
+                # Check what's missing
+                missing = []
+                if not self.settings.bsky_handle:
+                    missing.append("bsky_handle")
+                if not self.settings.bsky_app_password:
+                    missing.append("bsky_app_password")
+                print(f"[MAIN DEBUG] Missing fields: {missing}")
                 log_event(
                     source="main",
                     event_type="bluesky_disabled",
-                    payload={"reason": "missing_configuration"}
+                    payload={
+                        "reason": "missing_configuration",
+                        "missing_fields": missing
+                    }
                 )
                 return False
             
-            client.create_session()
+            print("[MAIN DEBUG] Client is enabled, attempting to create session...")
+            # Try to create session
+            try:
+                client.create_session()
+                print("[MAIN DEBUG] Session created successfully!")
+            except httpx.HTTPStatusError as e:
+                print(f"[MAIN DEBUG] ERROR: HTTPStatusError during session creation")
+                print(f"[MAIN DEBUG] Status code: {e.response.status_code if e.response else 'None'}")
+                # Extract more details from the error
+                error_info = {
+                    "status_code": e.response.status_code if e.response else None,
+                    "error_type": "HTTPStatusError"
+                }
+                try:
+                    if e.response:
+                        error_detail = e.response.json()
+                        error_info["error_detail"] = error_detail
+                        print(f"[MAIN DEBUG] Error detail (JSON): {error_detail}")
+                except Exception:
+                    if e.response:
+                        error_info["error_text"] = e.response.text[:200]
+                        print(f"[MAIN DEBUG] Error detail (text): {error_info['error_text']}")
+                
+                self.module_status["bluesky"] = "failed"
+                log_error("main", e, {
+                    "service": "bluesky",
+                    "action": "initialize",
+                    **error_info
+                })
+                log_event(
+                    source="main",
+                    event_type="bluesky_failed",
+                    payload={
+                        "error": str(e)[:200],
+                        **error_info
+                    }
+                )
+                print(f"[MAIN DEBUG] Bluesky initialization FAILED - check error details above")
+                return False
+            except Exception as e:
+                print(f"[MAIN DEBUG] ERROR: Unexpected error during session creation: {type(e).__name__}: {e}")
+                self.module_status["bluesky"] = "failed"
+                log_error("main", e, {
+                    "service": "bluesky",
+                    "action": "initialize",
+                    "error_type": type(e).__name__
+                })
+                log_event(
+                    source="main",
+                    event_type="bluesky_failed",
+                    payload={
+                        "error": str(e)[:200],
+                        "error_type": type(e).__name__
+                    }
+                )
+                return False
+            
+            print("[MAIN DEBUG] Storing Bluesky client instance...")
             self.bluesky_client = client
             self.module_status["bluesky"] = "active"
+            print("[MAIN DEBUG] Bluesky client marked as active")
             log_event(
                 source="main",
                 event_type="bluesky_initialized",
                 payload={}
             )
+            print("[MAIN DEBUG] ===== BLUESKY INITIALIZATION COMPLETE =====")
             return True
         except Exception as e:
+            print(f"[MAIN DEBUG] ERROR: Exception during Bluesky initialization: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             self.module_status["bluesky"] = "failed"
-            log_error("main", e, {"service": "bluesky", "action": "initialize"})
+            log_error("main", e, {
+                "service": "bluesky",
+                "action": "initialize",
+                "error_type": type(e).__name__
+            })
             log_event(
                 source="main",
                 event_type="bluesky_failed",
-                payload={"error": str(e)[:200]}
-            )
-            return False
-    
-    async def initialize_instagram(self) -> bool:
-        """Initialize Instagram client. Returns True if successful."""
-        if not self.settings.enable_instagram:
-            self.module_status["instagram"] = "disabled"
-            log_event(
-                source="main",
-                event_type="instagram_disabled",
-                payload={"reason": "enable_instagram=False"}
-            )
-            return False
-        
-        try:
-            client = InstagramClient()
-            if not client.is_enabled():
-                self.module_status["instagram"] = "disabled"
-                log_event(
-                    source="main",
-                    event_type="instagram_disabled",
-                    payload={"reason": "missing_configuration"}
-                )
-                return False
-            
-            # Just initialize, don't validate yet
-            self.instagram_client = client
-            self.module_status["instagram"] = "active"
-            log_event(
-                source="main",
-                event_type="instagram_initialized",
-                payload={}
-            )
-            return True
-        except Exception as e:
-            self.module_status["instagram"] = "failed"
-            log_error("main", e, {"service": "instagram", "action": "initialize"})
-            log_event(
-                source="main",
-                event_type="instagram_failed",
-                payload={"error": str(e)[:200]}
+                payload={
+                    "error": str(e)[:200],
+                    "error_type": type(e).__name__
+                }
             )
             return False
     
@@ -241,17 +283,11 @@ class HiveLordApp:
             return False
     
     async def send_system_online(self) -> None:
-        """Send 'System online' message to Discord and Telegram."""
+        """Send 'System online' message to Discord."""
         message = "🚀 System online - Wiring phase initialized"
         
         print("[MAIN DEBUG] ===== SENDING SYSTEM ONLINE MESSAGE =====")
         # Discord message is sent automatically via on_ready callback (registered in startup)
-        # Only send to Telegram here
-        if self.telegram_bot:
-            try:
-                await self.telegram_bot.send_message(message)
-            except Exception as e:
-                log_error("main", e, {"action": "send_system_online", "channel": "telegram"})
     
     async def startup(self) -> None:
         """Startup sequence - each module can fail gracefully."""
@@ -329,42 +365,8 @@ class HiveLordApp:
                 payload={"reason": "enable_discord=False"}
             )
         
-        # 6. Start Telegram bot (can fail gracefully)
-        if self.settings.enable_telegram:
-            try:
-                bot = TelegramBot()
-                if bot.is_enabled():
-                    self.telegram_bot = bot
-                    await self.telegram_bot.start()
-                    await asyncio.sleep(1.0)  # Wait for bot to connect
-                    self.module_status["telegram"] = "active"
-                    log_event(source="main", event_type="telegram_bot_started", payload={})
-                else:
-                    self.module_status["telegram"] = "disabled"
-                    log_event(
-                        source="main",
-                        event_type="telegram_bot_disabled",
-                        payload={"reason": "missing_configuration"}
-                    )
-            except Exception as e:
-                self.module_status["telegram"] = "failed"
-                log_error("main", e, {"action": "start_telegram_bot"})
-                log_event(
-                    source="main",
-                    event_type="telegram_bot_failed",
-                    payload={"error": str(e)[:200]}
-                )
-        else:
-            self.module_status["telegram"] = "disabled"
-            log_event(
-                source="main",
-                event_type="telegram_bot_disabled",
-                payload={"reason": "enable_telegram=False"}
-            )
-        
-        # 7. Initialize ingest clients (can fail gracefully)
+        # 6. Initialize ingest clients (can fail gracefully)
         await self.initialize_bluesky()
-        await self.initialize_instagram()
         await self.initialize_lovense()
         
         # 8. Send "System online" to available channels (Discord sends via on_ready callback)
@@ -422,26 +424,12 @@ class HiveLordApp:
         except Exception as e:
             log_error("main", e, {"action": "stop_lovense"})
         
-        # Stop Telegram bot
-        try:
-            if self.telegram_bot:
-                await self.telegram_bot.stop()
-        except Exception as e:
-            log_error("main", e, {"action": "stop_telegram_bot"})
-        
         # Stop Discord bot
         try:
             if self.discord_bot:
                 await self.discord_bot.stop()
         except Exception as e:
             log_error("main", e, {"action": "stop_discord_bot"})
-        
-        # Close Instagram client
-        try:
-            if self.instagram_client:
-                self.instagram_client.close()
-        except Exception as e:
-            log_error("main", e, {"action": "close_instagram"})
         
         # Close Bluesky client
         try:

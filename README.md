@@ -1,6 +1,6 @@
 # HiveLord - Multi-API System (Wiring Phase)
 
-A local-first Python system that wires together Instagram, Bluesky, Discord, Telegram, and Lovense APIs with comprehensive logging, consent gates, and safety infrastructure.
+A local-first Python system that wires together Bluesky, Discord, and Lovense APIs with comprehensive logging, consent gates, and safety infrastructure.
 
 ## Status
 
@@ -34,14 +34,12 @@ A local-first Python system that wires together Instagram, Bluesky, Discord, Tel
 - **Local-first**: All data stored in SQLite
 - **Safety-first**: Consent gates block device actions unless explicitly armed
 - **Logging**: All external interactions are logged to the database
-- **DM Control**: Discord (required) and Telegram (optional) serve as control channels
+- **DM Control**: Discord serves as the control channel
 
 ## Features (Wiring Phase)
 
-- ✅ Instagram Graph API integration (read-only)
 - ✅ Bluesky AT Protocol integration (session + post)
 - ✅ Discord bot (DM-based control)
-- ✅ Telegram bot (optional mirror)
 - ✅ Lovense Events API (events only, no commands)
 - ✅ Consent system with SAFE MODE
 - ✅ Comprehensive logging
@@ -49,7 +47,7 @@ A local-first Python system that wires together Instagram, Bluesky, Discord, Tel
 
 ## Safety Features
 
-- **SAFE MODE**: Send "SAFE MODE" to Discord/Telegram to immediately disable all consent
+- **SAFE MODE**: Send "SAFE MODE" to Discord to immediately disable all consent
 - **Consent Expiration**: Default 10-minute expiration for device commands
 - **Event Logging**: All actions logged to SQLite for audit
 - **No Auto-Control**: Device commands are blocked in this phase
@@ -57,4 +55,5 @@ A local-first Python system that wires together Instagram, Bluesky, Discord, Tel
 ## Project Structure
 
 See `CURSOR_BOOTSTRAP.md` for complete specification.
+
 

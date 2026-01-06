@@ -139,3 +139,4 @@ def get_scheduler() -> Scheduler:
         _scheduler = Scheduler()
     return _scheduler
 
+

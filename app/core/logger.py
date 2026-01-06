@@ -39,7 +39,7 @@ def log_event(
     Log an event to the database (if enabled), otherwise prints to console.
     
     Args:
-        source: Source of the event (e.g., 'instagram', 'discord', 'lovense')
+        source: Source of the event (e.g., 'discord', 'lovense', 'bluesky')
         event_type: Type of event (e.g., 'api_request', 'message_sent', 'device_connected')
         payload: Event payload (will be JSON serialized and redacted)
         db: Optional database session (creates new if not provided)
@@ -134,7 +134,7 @@ def log_api_response(source: str, status_code: int, response_data: Any | None = 
 
 
 def log_message_sent(channel: str, recipient: str, message_preview: str | None = None) -> None:
-    """Log a message sent to Discord/Telegram."""
+    """Log a message sent to Discord."""
     payload = {
         "channel": channel,
         "recipient": recipient,

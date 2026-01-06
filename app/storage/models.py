@@ -47,3 +47,4 @@ class ConsentLedger(Base):
     revoked_topics_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     armed_until_ts: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+
