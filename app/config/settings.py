@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     enable_bluesky: bool = Field(default=True, description="Enable Bluesky client")
     enable_lovense: bool = Field(default=True, description="Enable Lovense client")
     enable_database: bool = Field(default=True, description="Enable database")
+    enable_dom_mode: bool = Field(default=False, description="Enable Dom Bot mode")
     
     # Bluesky - Optional
     bsky_handle: str | None = Field(default=None, description="Bluesky Handle")
@@ -33,6 +34,9 @@ class Settings(BaseSettings):
     lovense_developer_token: str | None = Field(default=None, description="Lovense Developer Token")
     lovense_callback_url: str | None = Field(default=None, description="Lovense Callback URL")
     lovense_mode: str = Field(default="events", description="Lovense Mode: events | standard | socket")
+    
+    # OpenAI - Required for Dom Bot
+    openai_api_key: str | None = Field(default=None, description="OpenAI API Key")
     
     def __repr__(self) -> str:
         """Safe representation that never prints secrets."""
@@ -55,4 +59,9 @@ def get_settings() -> Settings:
     if _settings is None:
         _settings = Settings()
     return _settings
+
+
+def is_dom_mode_enabled() -> bool:
+    """Check if Dom Bot mode is enabled."""
+    return get_settings().enable_dom_mode
 

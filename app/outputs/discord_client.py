@@ -5,7 +5,7 @@ from typing import Optional, List, Tuple, Callable, Awaitable
 import discord
 from discord.ext import commands
 
-from app.config.settings import get_settings
+from app.config.settings import get_settings, is_dom_mode_enabled
 from app.core.consent import arm_consent, disarm_consent, safe_mode
 from app.core.logger import log_event, log_message_sent, log_error
 from app.core.scheduler import get_scheduler
@@ -14,7 +14,7 @@ from app.core.scheduler import get_scheduler
 class DiscordBot:
     """Discord bot for DM-based control."""
     
-    def __init__(self):
+    def __init__(self, dom_bot=None):
         self.settings = get_settings()
         self.bot: Optional[commands.Bot] = None
         self.user_id: Optional[int] = None
@@ -23,6 +23,7 @@ class DiscordBot:
         self._ready_event = asyncio.Event()
         self._first_message: Optional[str] = None
         self._image_callback: Optional[Callable[[discord.Message, Tuple[bytes, str]], Awaitable[None]]] = None
+        self.dom_bot = dom_bot
     
     def is_enabled(self) -> bool:
         """Check if Discord bot is enabled and has required configuration."""
@@ -140,32 +141,35 @@ class DiscordBot:
         if message.author == self.bot.user:
             return
         
-        content = message.content.strip().upper()
+        content = message.content.strip()
+        content_upper = content.upper()
         
         log_event(
             source="discord",
             event_type="command_received",
-            payload={"command": content, "user_id": message.author.id}
+            payload={"command": content_upper, "user_id": message.author.id}
         )
         
-        # Handle commands
-        if content == "ARM":
+        # Handle system commands (always available)
+        if content_upper == "ARM":
             try:
                 arm_consent()
                 await message.channel.send("✅ Consent ARMED (10 minutes)")
             except Exception as e:
                 log_error("discord", e, {"command": "ARM"})
                 await message.channel.send(f"❌ Error: {str(e)}")
+            return
         
-        elif content == "DISARM":
+        elif content_upper == "DISARM":
             try:
                 disarm_consent()
                 await message.channel.send("✅ Consent DISARMED")
             except Exception as e:
                 log_error("discord", e, {"command": "DISARM"})
                 await message.channel.send(f"❌ Error: {str(e)}")
+            return
         
-        elif content == "SAFE MODE":
+        elif content_upper == "SAFE MODE":
             try:
                 safe_mode()
                 # Cancel all scheduled tasks
@@ -175,24 +179,82 @@ class DiscordBot:
             except Exception as e:
                 log_error("discord", e, {"command": "SAFE MODE"})
                 await message.channel.send(f"❌ Error: {str(e)}")
+            return
         
-        else:
-            # Check for image attachments
-            image_data = await self.read_image_from_message(message)
-            if image_data:
-                print("[DISCORD DEBUG] Image detected in message, calling image callback...")
-                if self._image_callback:
-                    try:
-                        await self._image_callback(message, image_data)
-                        await message.channel.send("✅ Image received and processing...")
-                    except Exception as e:
-                        print(f"[DISCORD DEBUG] ERROR in image callback: {type(e).__name__}: {e}")
-                        log_error("discord", e, {"action": "image_callback"})
-                        await message.channel.send(f"❌ Error processing image: {str(e)}")
-                else:
-                    await message.channel.send("⚠️ Image received but no handler configured")
+        # Check for Dom Bot mode
+        if is_dom_mode_enabled() and self.dom_bot:
+            # Route to Dom Bot
+            try:
+                # Check for image attachments
+                image_data = await self.read_image_from_message(message)
+                image_bytes = image_data[0] if image_data else None
+                image_content_type = image_data[1] if image_data else None
+                
+                # Call Dom Bot
+                response = await self.dom_bot.respond(
+                    user_text=content,
+                    channel_id=str(message.channel.id),
+                    user_id=str(message.author.id),
+                    image_data=image_bytes,
+                    image_content_type=image_content_type
+                )
+                
+                # Send immediate message
+                await message.channel.send(response.message)
+                
+                # Handle memory writes if any
+                if response.memory_write:
+                    from app.ai.tool_handlers import memory_upsert
+                    for mem_write in response.memory_write:
+                        await memory_upsert({
+                            "key": mem_write.key,
+                            "value": mem_write.value,
+                            "metadata": mem_write.metadata
+                        })
+                
+                # Log actions
+                if response.actions:
+                    log_event(
+                        source="dom_bot",
+                        event_type="actions_executed",
+                        payload={
+                            "actions_count": len(response.actions),
+                            "actions": [
+                                {
+                                    "tool_name": action.tool_name,
+                                    "task_id": action.task_id
+                                }
+                                for action in response.actions
+                            ]
+                        }
+                    )
+                
+            except Exception as e:
+                log_error("discord", e, {"action": "dom_bot_respond"})
+                await message.channel.send(f"❌ Error processing request: {str(e)}")
+            return
+        
+        # Dom mode disabled - send neutral response
+        if not is_dom_mode_enabled():
+            await message.channel.send("Dom mode disabled. Enable it in settings to use Dom Bot.")
+            return
+        
+        # Fallback: check for image attachments (legacy handler)
+        image_data = await self.read_image_from_message(message)
+        if image_data:
+            print("[DISCORD DEBUG] Image detected in message, calling image callback...")
+            if self._image_callback:
+                try:
+                    await self._image_callback(message, image_data)
+                    await message.channel.send("✅ Image received and processing...")
+                except Exception as e:
+                    print(f"[DISCORD DEBUG] ERROR in image callback: {type(e).__name__}: {e}")
+                    log_error("discord", e, {"action": "image_callback"})
+                    await message.channel.send(f"❌ Error processing image: {str(e)}")
             else:
-                await message.channel.send(f"Unknown command: {content}\nAvailable: ARM, DISARM, SAFE MODE")
+                await message.channel.send("⚠️ Image received but no handler configured")
+        else:
+            await message.channel.send(f"Unknown command: {content_upper}\nAvailable: ARM, DISARM, SAFE MODE")
     
     def set_image_callback(self, callback: Callable[[discord.Message, Tuple[bytes, str]], Awaitable[None]]) -> None:
         """
