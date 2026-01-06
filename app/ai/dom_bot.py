@@ -1,7 +1,7 @@
 """Dom Bot brain - OpenAI Responses API agent loop."""
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 
 from openai import OpenAI
@@ -72,6 +72,49 @@ class DomBot:
                 return rewritten, True, "pattern_match"
 
         return "Tell me what you need.", True, "phrase_detected"
+    @staticmethod
+    def _has_time_reference(user_text: str) -> bool:
+        """Check whether the user specified a time of day."""
+        time_patterns = [
+            r"\b\d{1,2}(:\d{2})?\s?(am|pm)\b",
+            r"\b\d{1,2}:\d{2}\b",
+            r"\b(noon|midnight|morning|afternoon|evening|night|tonight)\b",
+        ]
+        return any(re.search(pattern, user_text, re.IGNORECASE) for pattern in time_patterns)
+
+    @staticmethod
+    def _is_schedule_intent(user_text: str) -> bool:
+        """Detect scheduling intent in user text."""
+        intent_patterns = [
+            r"\bschedule\b",
+            r"\bremind\b",
+            r"\breminder\b",
+            r"\bpost\b",
+            r"\bsend\b",
+            r"\blater\b",
+        ]
+        return any(re.search(pattern, user_text, re.IGNORECASE) for pattern in intent_patterns)
+
+    @staticmethod
+    def _detect_platform(user_text: str) -> Optional[str]:
+        """Detect requested platform from user text."""
+        if re.search(r"\b(bsky|bluesky)\b", user_text, re.IGNORECASE):
+            return "bsky"
+        if re.search(r"\bdiscord\b", user_text, re.IGNORECASE):
+            return "discord"
+        return None
+
+    @staticmethod
+    def _default_when_utc() -> str:
+        """Compute next morning at 08:00 local time, converted to UTC."""
+        local_now = datetime.now().astimezone()
+        next_morning_local = (local_now + timedelta(days=1)).replace(
+            hour=8,
+            minute=0,
+            second=0,
+            microsecond=0
+        )
+        return next_morning_local.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     
     async def _execute_tool(
         self,
@@ -136,6 +179,57 @@ class DomBot:
                 actions=[],
                 needs_followup=False
             )
+
+        if self._is_schedule_intent(user_text) and not self._has_time_reference(user_text):
+            platform = self._detect_platform(user_text) or "discord"
+            when_utc = self._default_when_utc()
+            if platform == "bsky":
+                tool_name = "bsky_schedule_post"
+                tool_args = {"text": user_text, "when_utc": when_utc}
+                message = "Tomorrow at 08:00 local. Scheduled on Bluesky."
+            else:
+                tool_name = "discord_schedule_message"
+                tool_args = {"message": user_text, "when_utc": when_utc}
+                message = "Tomorrow at 08:00 local. Scheduled on Discord."
+
+            tool_result = await self._execute_tool(
+                tool_name,
+                tool_args,
+                channel_id,
+                image_data,
+                image_content_type
+            )
+
+            tool_calls_log = [{
+                "tool_name": tool_name,
+                "args": tool_args,
+                "result": tool_result
+            }]
+
+            actions = [
+                Action(
+                    tool_name=tool_name,
+                    args=tool_args,
+                    result=tool_result,
+                    task_id=tool_result.get("task_id")
+                )
+            ]
+
+            final_response = DomBotResponse(
+                message=message,
+                actions=actions,
+                needs_followup=False
+            )
+
+            log_conversation_turn(
+                user_text,
+                final_response,
+                tool_calls_log,
+                channel_id,
+                user_id
+            )
+
+            return final_response
         
         # Build conversation context
         messages = [
@@ -163,16 +257,15 @@ class DomBot:
                     request_params["tools"] = self.tools
                     request_params["tool_choice"] = "auto"
                 
-                # Add structured output only when we expect final response (after tool calls or if no tools needed)
-                if has_tool_calls or iteration > 1:
-                    request_params["response_format"] = {
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": "dom_bot_response",
-                            "strict": True,
-                            "schema": self.response_schema
-                        }
+                # Add structured output for final responses
+                request_params["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "dom_bot_response",
+                        "strict": True,
+                        "schema": self.response_schema
                     }
+                }
                 
                 # Call OpenAI
                 response = self.client.chat.completions.create(**request_params)
@@ -232,10 +325,12 @@ class DomBot:
                 content = message.content
                 if not content:
                     return DomBotResponse(
-                        message="I need to process your request. Please try again.",
+                        message=(
+                            "Proceeding with the default assumption that you want a Discord message "
+                            "sent now to the current channel. Share any changes if needed."
+                        ),
                         actions=[],
-                        needs_followup=True,
-                        followup_question="Could you rephrase your request?"
+                        needs_followup=False
                     )
                 
                 # Parse structured JSON response
@@ -243,10 +338,10 @@ class DomBot:
                     response_data = json.loads(content)
                     final_response = DomBotResponse(**response_data)
                 except (json.JSONDecodeError, ValueError) as e:
-                    # Fallback: create response from text
+                    # Fallback: return directive response on schema failure
                     log_error("dom_bot", e, {"content": content[:200]})
                     final_response = DomBotResponse(
-                        message=content,
+                        message="A systems fault interrupted execution. I corrected course. Continue.",
                         actions=[],
                         needs_followup=False
                     )
@@ -295,15 +390,17 @@ class DomBot:
                     "user_text": user_text[:200]
                 })
                 return DomBotResponse(
-                    message=f"I encountered an error: {str(e)}",
+                    message="A systems fault interrupted execution. I corrected course. Continue.",
                     actions=[],
                     needs_followup=False
                 )
         
         # Max iterations reached
         return DomBotResponse(
-            message="I'm having trouble processing your request. Please try again with more specific instructions.",
+            message=(
+                "Proceeding with the default assumption that you want a Discord message "
+                "sent now to the current channel. Share any changes if needed."
+            ),
             actions=[],
-            needs_followup=True,
-            followup_question="Could you provide more details?"
+            needs_followup=False
         )
