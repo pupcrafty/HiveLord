@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HiveLord Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+
+        .stats-bar {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        .stat-card h3 {
+            color: #667eea;
+            font-size: 2em;
+            margin-bottom: 5px;
+        }
+
+        .stat-card p {
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+
+        .tabs {
+            display: flex;
+            background: #f8f9fa;
+            border-bottom: 2px solid #e9ecef;
+            overflow-x: auto;
+        }
+
+        .tab {
+            padding: 15px 30px;
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            font-size: 1em;
+            font-weight: 500;
+            color: #6c757d;
+            transition: all 0.3s;
+            white-space: nowrap;
+        }
+
+        .tab:hover {
+            background: #e9ecef;
+            color: #667eea;
+        }
+
+        .tab.active {
+            background: white;
+            color: #667eea;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 30px;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+
+        .status-running {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-done {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .status-cancelled {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-scheduled {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            background: white;
+        }
+
+        th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #495057;
+            border-bottom: 2px solid #dee2e6;
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #dee2e6;
+            color: #212529;
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        .json-display {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+
+        .empty-state svg {
+            width: 100px;
+            height: 100px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        .scheduler-info {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .scheduler-info h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            font-weight: 500;
+            color: #495057;
+        }
+
+        .info-value {
+            color: #6c757d;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.8em;
+            }
+
+            .stats-bar {
+                grid-template-columns: 1fr;
+            }
+
+            .tab-content {
+                padding: 15px;
+            }
+
+            table {
+                font-size: 0.85em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🐝 HiveLord Dashboard</h1>
+            <p>Database & Scheduler Monitor</p>
+        </div>
+
+        <div class="stats-bar" id="statsBar">
+            <div class="stat-card">
+                <h3 id="statRuns">-</h3>
+                <p>Runs</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="statEvents">-</h3>
+                <p>Events</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="statConsent">-</h3>
+                <p>Consent Entries</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="statMemory">-</h3>
+                <p>Memory Entries</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="statSchedulerDb">-</h3>
+                <p>DB Scheduled Tasks</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="statPeriodic">-</h3>
+                <p>Periodic Tasks</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="statOneShot">-</h3>
+                <p>One-Shot Tasks</p>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('scheduler')">Scheduler</button>
+            <button class="tab" onclick="switchTab('runs')">Runs</button>
+            <button class="tab" onclick="switchTab('events')">Events</button>
+            <button class="tab" onclick="switchTab('consent')">Consent</button>
+            <button class="tab" onclick="switchTab('memory')">Memory</button>
+        </div>
+
+        <div id="scheduler" class="tab-content active">
+            <div class="controls">
+                <button class="btn btn-primary" onclick="loadScheduler()">Refresh</button>
+            </div>
+            <div id="schedulerContent">
+                <div class="loading">Loading scheduler status...</div>
+            </div>
+        </div>
+
+        <div id="runs" class="tab-content">
+            <div class="controls">
+                <button class="btn btn-primary" onclick="loadRuns()">Refresh</button>
+            </div>
+            <div id="runsContent">
+                <div class="loading">Loading runs...</div>
+            </div>
+        </div>
+
+        <div id="events" class="tab-content">
+            <div class="controls">
+                <button class="btn btn-primary" onclick="loadEvents()">Refresh</button>
+            </div>
+            <div id="eventsContent">
+                <div class="loading">Loading events...</div>
+            </div>
+        </div>
+
+        <div id="consent" class="tab-content">
+            <div class="controls">
+                <button class="btn btn-primary" onclick="loadConsent()">Refresh</button>
+            </div>
+            <div id="consentContent">
+                <div class="loading">Loading consent ledger...</div>
+            </div>
+        </div>
+
+        <div id="memory" class="tab-content">
+            <div class="controls">
+                <button class="btn btn-primary" onclick="loadMemory()">Refresh</button>
+            </div>
+            <div id="memoryContent">
+                <div class="loading">Loading memory entries...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function switchTab(tabName) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Remove active class from all tabs
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Show selected tab content
+            document.getElementById(tabName).classList.add('active');
+            
+            // Add active class to clicked tab
+            event.target.classList.add('active');
+            
+            // Load data for the tab
+            if (tabName === 'scheduler') loadScheduler();
+            else if (tabName === 'runs') loadRuns();
+            else if (tabName === 'events') loadEvents();
+            else if (tabName === 'consent') loadConsent();
+            else if (tabName === 'memory') loadMemory();
+        }
+
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/database/stats');
+                const result = await response.json();
+                if (result.success) {
+                    document.getElementById('statRuns').textContent = result.data.runs;
+                    document.getElementById('statEvents').textContent = result.data.events;
+                    document.getElementById('statConsent').textContent = result.data.consent_entries;
+                    document.getElementById('statMemory').textContent = result.data.memory_entries;
+                    if (document.getElementById('statSchedulerDb')) {
+                        document.getElementById('statSchedulerDb').textContent = result.data.scheduler_tasks ?? '-';
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        async function loadScheduler() {
+            const content = document.getElementById('schedulerContent');
+            content.innerHTML = '<div class="loading">Loading scheduler status...</div>';
+            
+            try {
+                // Fetch both: in-memory scheduler status (this process) and DB-persisted tasks
+                const [statusResp, tasksResp] = await Promise.all([
+                    fetch('/api/scheduler/status'),
+                    fetch('/api/database/scheduler_tasks'),
+                ]);
+                const statusResult = await statusResp.json();
+                const tasksResult = await tasksResp.json();
+
+                if (!statusResult.success) {
+                    content.innerHTML = `<div class="error">Error loading scheduler status: ${statusResult.error || 'Unknown error'}</div>`;
+                    return;
+                }
+                if (!tasksResult.success) {
+                    content.innerHTML = `<div class="error">Error loading DB scheduler tasks: ${tasksResult.error || 'Unknown error'}</div>`;
+                    return;
+                }
+
+                const data = statusResult.data;
+                const tasks = tasksResult.data || [];
+
+                document.getElementById('statPeriodic').textContent = data.periodic_count;
+                document.getElementById('statOneShot').textContent = data.one_shot_count;
+
+                // DB scheduled tasks count
+                const scheduledDbCount = tasks.filter(t => t.status === 'scheduled').length;
+                if (document.getElementById('statSchedulerDb')) {
+                    document.getElementById('statSchedulerDb').textContent = scheduledDbCount;
+                }
+
+                let html = '<div class="scheduler-info">';
+                html += '<h3>Scheduler (this UI process)</h3>';
+                html += `<p style="margin-top: 5px; color: #6c757d;">If you run the bot in a separate process, the in-memory lists below may be empty. The “DB Persisted Tasks” section reflects what the bot actually persisted.</p>`;
+                html += `<div class="info-row"><span class="info-label">Running:</span><span class="info-value">${data.running ? 'Yes' : 'No'}</span></div>`;
+                html += `<div class="info-row"><span class="info-label">Cancelled:</span><span class="info-value">${data.cancelled ? 'Yes' : 'No'}</span></div>`;
+                html += '</div>';
+
+                html += '<h3>DB Persisted Tasks</h3>';
+                if (tasks.length === 0) {
+                    html += '<div class="empty-state">No scheduler tasks found in the database</div>';
+                } else {
+                    html += `<p style="margin-bottom: 15px; color: #6c757d;">Showing ${tasksResult.count} task record(s)</p>`;
+                    html += '<table><thead><tr><th>Status</th><th>Type</th><th>Name</th><th>Scheduled For (UTC)</th><th>Handler</th><th>Task ID</th><th>Details</th></tr></thead><tbody>';
+                    tasks.forEach(t => {
+                        const statusClass =
+                            t.status === 'cancelled' ? 'status-cancelled' :
+                            t.status === 'completed' ? 'status-done' :
+                            'status-scheduled';
+                        const details = t.parameters ? escapeHtml(JSON.stringify(t.parameters, null, 2)) : '-';
+                        html += `<tr>
+                            <td><span class="status-badge ${statusClass}">${escapeHtml(t.status || '-')}</span></td>
+                            <td>${escapeHtml(t.task_type || '-')}</td>
+                            <td><strong>${escapeHtml(t.name || '-')}</strong></td>
+                            <td>${t.scheduled_for ? `<code>${escapeHtml(t.scheduled_for)}</code>` : '-'}</td>
+                            <td>${escapeHtml(t.handler_type || '-')}</td>
+                            <td><code>${escapeHtml(t.task_id)}</code></td>
+                            <td><div class="json-display">${details}</div></td>
+                        </tr>`;
+                    });
+                    html += '</tbody></table>';
+                }
+
+                html += '<h3 style="margin-top: 30px;">In-memory Periodic Tasks (this UI process)</h3>';
+                if (data.periodic_tasks.length === 0) {
+                    html += '<div class="empty-state">No periodic tasks scheduled</div>';
+                } else {
+                    html += '<table><thead><tr><th>Name</th><th>Status</th><th>Details</th></tr></thead><tbody>';
+                    data.periodic_tasks.forEach(task => {
+                        const statusClass = task.cancelled ? 'status-cancelled' :
+                                          task.status === 'running' ? 'status-running' : 'status-done';
+                        html += `<tr>
+                            <td><strong>${escapeHtml(task.name)}</strong></td>
+                            <td><span class="status-badge ${statusClass}">${escapeHtml(task.status)}</span></td>
+                            <td>${task.exception ? `<span style="color: red;">Error: ${escapeHtml(task.exception)}</span>` : '-'}</td>
+                        </tr>`;
+                    });
+                    html += '</tbody></table>';
+                }
+
+                html += '<h3 style="margin-top: 30px;">In-memory One-Shot Tasks (this UI process)</h3>';
+                if (data.one_shot_tasks.length === 0) {
+                    html += '<div class="empty-state">No one-shot tasks scheduled</div>';
+                } else {
+                    html += '<table><thead><tr><th>Task ID</th><th>Status</th><th>Details</th></tr></thead><tbody>';
+                    data.one_shot_tasks.forEach(task => {
+                        const statusClass = task.cancelled ? 'status-cancelled' :
+                                          task.status === 'scheduled' ? 'status-scheduled' : 'status-done';
+                        html += `<tr>
+                            <td><code>${escapeHtml(task.task_id)}</code></td>
+                            <td><span class="status-badge ${statusClass}">${escapeHtml(task.status)}</span></td>
+                            <td>${task.exception ? `<span style="color: red;">Error: ${escapeHtml(task.exception)}</span>` : '-'}</td>
+                        </tr>`;
+                    });
+                    html += '</tbody></table>';
+                }
+
+                content.innerHTML = html;
+            } catch (error) {
+                content.innerHTML = `<div class="error">Error loading scheduler: ${error.message}</div>`;
+            }
+        }
+
+        async function loadRuns() {
+            const content = document.getElementById('runsContent');
+            content.innerHTML = '<div class="loading">Loading runs...</div>';
+            
+            try {
+                const response = await fetch('/api/database/runs');
+                const result = await response.json();
+                
+                if (result.success) {
+                    if (result.data.length === 0) {
+                        content.innerHTML = '<div class="empty-state">No runs found</div>';
+                    } else {
+                        let html = `<p style="margin-bottom: 15px; color: #6c757d;">Showing ${result.count} run(s)</p>`;
+                        html += '<table><thead><tr><th>ID</th><th>Started At</th><th>Ended At</th><th>Version</th><th>Notes</th></tr></thead><tbody>';
+                        result.data.forEach(run => {
+                            html += `<tr>
+                                <td>${run.id}</td>
+                                <td>${formatDate(run.started_at)}</td>
+                                <td>${formatDate(run.ended_at) || '-'}</td>
+                                <td>${escapeHtml(run.version || '-')}</td>
+                                <td>${escapeHtml(run.notes || '-')}</td>
+                            </tr>`;
+                        });
+                        html += '</tbody></table>';
+                        content.innerHTML = html;
+                    }
+                } else {
+                    content.innerHTML = `<div class="error">Error: ${result.error || 'Unknown error'}</div>`;
+                }
+            } catch (error) {
+                content.innerHTML = `<div class="error">Error loading runs: ${error.message}</div>`;
+            }
+        }
+
+        async function loadEvents() {
+            const content = document.getElementById('eventsContent');
+            content.innerHTML = '<div class="loading">Loading events...</div>';
+            
+            try {
+                const response = await fetch('/api/database/events');
+                const result = await response.json();
+                
+                if (result.success) {
+                    if (result.data.length === 0) {
+                        content.innerHTML = '<div class="empty-state">No events found</div>';
+                    } else {
+                        let html = `<p style="margin-bottom: 15px; color: #6c757d;">Showing ${result.count} event(s)</p>`;
+                        html += '<table><thead><tr><th>ID</th><th>Timestamp</th><th>Source</th><th>Type</th><th>Payload</th></tr></thead><tbody>';
+                        result.data.forEach(event => {
+                            html += `<tr>
+                                <td>${event.id}</td>
+                                <td>${formatDate(event.ts)}</td>
+                                <td><strong>${escapeHtml(event.source)}</strong></td>
+                                <td>${escapeHtml(event.type)}</td>
+                                <td><div class="json-display">${escapeHtml(JSON.stringify(event.payload, null, 2))}</div></td>
+                            </tr>`;
+                        });
+                        html += '</tbody></table>';
+                        content.innerHTML = html;
+                    }
+                } else {
+                    content.innerHTML = `<div class="error">Error: ${result.error || 'Unknown error'}</div>`;
+                }
+            } catch (error) {
+                content.innerHTML = `<div class="error">Error loading events: ${error.message}</div>`;
+            }
+        }
+
+        async function loadConsent() {
+            const content = document.getElementById('consentContent');
+            content.innerHTML = '<div class="loading">Loading consent ledger...</div>';
+            
+            try {
+                const response = await fetch('/api/database/consent');
+                const result = await response.json();
+                
+                if (result.success) {
+                    if (result.data.length === 0) {
+                        content.innerHTML = '<div class="empty-state">No consent entries found</div>';
+                    } else {
+                        let html = `<p style="margin-bottom: 15px; color: #6c757d;">Showing ${result.count} entry/entries</p>`;
+                        html += '<table><thead><tr><th>ID</th><th>Timestamp</th><th>Consent Active</th><th>Allowed Modes</th><th>Revoked Topics</th><th>Armed Until</th></tr></thead><tbody>';
+                        result.data.forEach(entry => {
+                            html += `<tr>
+                                <td>${entry.id}</td>
+                                <td>${formatDate(entry.ts)}</td>
+                                <td><span class="status-badge ${entry.consent_active ? 'status-running' : 'status-cancelled'}">${entry.consent_active ? 'Active' : 'Inactive'}</span></td>
+                                <td>${escapeHtml(JSON.stringify(entry.allowed_modes))}</td>
+                                <td>${escapeHtml(JSON.stringify(entry.revoked_topics))}</td>
+                                <td>${formatDate(entry.armed_until_ts) || '-'}</td>
+                            </tr>`;
+                        });
+                        html += '</tbody></table>';
+                        content.innerHTML = html;
+                    }
+                } else {
+                    content.innerHTML = `<div class="error">Error: ${result.error || 'Unknown error'}</div>`;
+                }
+            } catch (error) {
+                content.innerHTML = `<div class="error">Error loading consent: ${error.message}</div>`;
+            }
+        }
+
+        async function loadMemory() {
+            const content = document.getElementById('memoryContent');
+            content.innerHTML = '<div class="loading">Loading memory entries...</div>';
+            
+            try {
+                const response = await fetch('/api/database/memory');
+                const result = await response.json();
+                
+                if (result.success) {
+                    if (result.data.length === 0) {
+                        content.innerHTML = '<div class="empty-state">No memory entries found</div>';
+                    } else {
+                        let html = `<p style="margin-bottom: 15px; color: #6c757d;">Showing ${result.count} entry/entries</p>`;
+                        html += '<table><thead><tr><th>ID</th><th>Key</th><th>Value</th><th>Metadata</th><th>Created</th><th>Updated</th></tr></thead><tbody>';
+                        result.data.forEach(memory => {
+                            html += `<tr>
+                                <td>${memory.id}</td>
+                                <td><strong>${escapeHtml(memory.key)}</strong></td>
+                                <td><div class="json-display">${escapeHtml(memory.value)}</div></td>
+                                <td><div class="json-display">${escapeHtml(JSON.stringify(memory.metadata, null, 2))}</div></td>
+                                <td>${formatDate(memory.created_at)}</td>
+                                <td>${formatDate(memory.updated_at)}</td>
+                            </tr>`;
+                        });
+                        html += '</tbody></table>';
+                        content.innerHTML = html;
+                    }
+                } else {
+                    content.innerHTML = `<div class="error">Error: ${result.error || 'Unknown error'}</div>`;
+                }
+            } catch (error) {
+                content.innerHTML = `<div class="error">Error loading memory: ${error.message}</div>`;
+            }
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return null;
+            try {
+                const date = new Date(dateStr);
+                return date.toLocaleString();
+            } catch {
+                return dateStr;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Load initial data
+        loadStats();
+        loadScheduler();
+        
+        // Auto-refresh stats every 10 seconds
+        setInterval(loadStats, 10000);
+    </script>
+</body>
+</html>
+

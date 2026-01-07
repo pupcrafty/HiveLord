@@ -174,7 +174,8 @@ class DiscordBot:
                 safe_mode()
                 # Cancel all scheduled tasks
                 scheduler = get_scheduler()
-                scheduler.cancel_all()
+                # SAFE MODE is an explicit cancellation: persist cancellation to DB.
+                scheduler.cancel_all(persist_db=True)
                 await message.channel.send("🔒 SAFE MODE ACTIVATED - All consent disabled, tasks cancelled")
             except Exception as e:
                 log_error("discord", e, {"command": "SAFE MODE"})

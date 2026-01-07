@@ -16,6 +16,7 @@ from app.outputs.discord_client import DiscordBot
 from app.storage.db import init_db, get_db_sync
 from app.storage.models import Run
 from app.ai.dom_bot import DomBot
+from app.ai.tool_handlers import register_scheduler_restore_handlers
 
 
 class HiveLordApp:
@@ -404,6 +405,29 @@ class HiveLordApp:
             self.scheduler.start()
             self.module_status["scheduler"] = "active"
             log_event(source="main", event_type="scheduler_started", payload={})
+            
+            # 9.5. Register restoration handlers and restore pending tasks
+            try:
+                register_scheduler_restore_handlers(
+                    self.scheduler,
+                    discord_bot=self.discord_bot,
+                    bluesky_client=self.bluesky_client
+                )
+                
+                # Restore pending tasks from database
+                restore_result = self.scheduler.restore_pending_tasks()
+                log_event(
+                    source="main",
+                    event_type="scheduler_tasks_restored",
+                    payload=restore_result
+                )
+            except Exception as e:
+                log_error("main", e, {"action": "restore_scheduler_tasks"})
+                log_event(
+                    source="main",
+                    event_type="scheduler_restore_failed",
+                    payload={"error": str(e)[:200]}
+                )
         except Exception as e:
             self.module_status["scheduler"] = "failed"
             log_error("main", e, {"action": "start_scheduler"})
@@ -440,7 +464,9 @@ class HiveLordApp:
         # Stop scheduler
         try:
             if self.scheduler:
-                self.scheduler.stop()
+                # Graceful shutdown: cancel in-memory tasks without marking DB tasks as cancelled.
+                # This allows tasks to restore on next startup.
+                self.scheduler.stop(persist_db=False)
         except Exception as e:
             log_error("main", e, {"action": "stop_scheduler"})
         

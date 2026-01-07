@@ -29,6 +29,12 @@ A local-first Python system that wires together Bluesky, Discord, and Lovense AP
    python -m app.main
    ```
 
+4. (Optional) Run the web UI dashboard to view database and scheduler status:
+   ```bash
+   python run_ui.py
+   ```
+   Then open http://127.0.0.1:5000 in your browser.
+
 ## Architecture
 
 - **Local-first**: All data stored in SQLite
@@ -44,6 +50,7 @@ A local-first Python system that wires together Bluesky, Discord, and Lovense AP
 - ✅ Consent system with SAFE MODE
 - ✅ Comprehensive logging
 - ✅ SQLite storage
+- ✅ Web UI dashboard for database and scheduler monitoring
 
 ## Safety Features
 

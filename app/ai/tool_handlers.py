@@ -172,7 +172,23 @@ async def discord_schedule_message(
         # Validate future time
         now = datetime.now(timezone.utc)
         if when_dt <= now:
-            return {"error": f"Cannot schedule message in the past. Requested: {when_dt.isoformat()}, Now: {now.isoformat()}"}
+            # Provide helpful error message with current time
+            error_msg = (
+                f"Cannot schedule message in the past. "
+                f"Requested: {when_dt.isoformat()}, "
+                f"Current UTC: {now.isoformat()}. "
+                f"Please use a FUTURE datetime relative to the current time."
+            )
+            log_event(
+                source="dom_bot",
+                event_type="scheduling_error_past_date",
+                payload={
+                    "requested": when_dt.isoformat(),
+                    "current": now.isoformat(),
+                    "message_preview": message[:100]
+                }
+            )
+            return {"error": error_msg}
         
         # Create coroutine to send message
         async def send_scheduled_message():
@@ -195,7 +211,16 @@ async def discord_schedule_message(
         
         # Schedule it
         scheduler = get_scheduler()
-        task_id = scheduler.schedule_at(when_dt, send_scheduled_message(), name=f"discord_msg_{channel_id}")
+        task_id = scheduler.schedule_at(
+            when_dt,
+            send_scheduled_message(),
+            name=f"discord_msg_{channel_id}",
+            handler_type="discord_schedule_message",
+            parameters={
+                "message": message,
+                "channel_id": channel_id
+            }
+        )
         
         result = {
             "task_id": task_id,
@@ -254,7 +279,23 @@ async def bsky_schedule_post(
         # Validate future time
         now = datetime.now(timezone.utc)
         if when_dt <= now:
-            return {"error": f"Cannot schedule post in the past. Requested: {when_dt.isoformat()}, Now: {now.isoformat()}"}
+            # Provide helpful error message with current time
+            error_msg = (
+                f"Cannot schedule post in the past. "
+                f"Requested: {when_dt.isoformat()}, "
+                f"Current UTC: {now.isoformat()}. "
+                f"Please use a FUTURE datetime relative to the current time."
+            )
+            log_event(
+                source="dom_bot",
+                event_type="scheduling_error_past_date",
+                payload={
+                    "requested": when_dt.isoformat(),
+                    "current": now.isoformat(),
+                    "text_preview": text[:100]
+                }
+            )
+            return {"error": error_msg}
         
         # Handle image if provided
         final_image_data = image_data
@@ -297,7 +338,23 @@ async def bsky_schedule_post(
         
         # Schedule it
         scheduler = get_scheduler()
-        task_id = scheduler.schedule_at(when_dt, post_scheduled(), name="bsky_post")
+        # Store image as base64 for persistence
+        image_b64 = None
+        if final_image_data:
+            import base64
+            image_b64 = base64.b64encode(final_image_data).decode('utf-8')
+        
+        task_id = scheduler.schedule_at(
+            when_dt,
+            post_scheduled(),
+            name="bsky_post",
+            handler_type="bsky_schedule_post",
+            parameters={
+                "text": text,
+                "image_bytes": image_b64,
+                "image_content_type": final_image_type if final_image_data else None
+            }
+        )
         
         result = {
             "task_id": task_id,
@@ -322,4 +379,85 @@ TOOL_HANDLERS = {
     "discord_schedule_message": discord_schedule_message,
     "bsky_schedule_post": bsky_schedule_post,
 }
+
+
+def register_scheduler_restore_handlers(
+    scheduler,
+    discord_bot=None,
+    bluesky_client=None
+) -> None:
+    """
+    Register restoration handlers for scheduler tasks.
+    
+    Args:
+        scheduler: Scheduler instance
+        discord_bot: DiscordBot instance (optional)
+        bluesky_client: BlueskyClient instance (optional)
+    """
+    # Register Discord message restoration handler
+    if discord_bot:
+        async def restore_discord_message(parameters: Dict[str, Any]) -> None:
+            """Restore a scheduled Discord message."""
+            message = parameters.get("message", "")
+            channel_id = parameters.get("channel_id", "")
+            
+            if message:
+                try:
+                    await discord_bot.send_message(message)
+                    log_event(
+                        source="scheduler",
+                        event_type="restored_discord_message_sent",
+                        payload={
+                            "channel_id": channel_id,
+                            "message": message[:100]
+                        }
+                    )
+                except Exception as e:
+                    log_error("scheduler", e, {
+                        "action": "restore_discord_message",
+                        "channel_id": channel_id
+                    })
+        
+        scheduler.register_restore_handler("discord_schedule_message", restore_discord_message)
+    
+    # Register Bluesky post restoration handler
+    if bluesky_client:
+        async def restore_bsky_post(parameters: Dict[str, Any]) -> None:
+            """Restore a scheduled Bluesky post."""
+            text = parameters.get("text", "")
+            image_bytes_b64 = parameters.get("image_bytes")
+            image_content_type = parameters.get("image_content_type", "image/jpeg")
+            
+            if text:
+                try:
+                    image_data = None
+                    if image_bytes_b64:
+                        image_data = base64.b64decode(image_bytes_b64)
+                    
+                    if image_data:
+                        # Upload blob first
+                        blob_result = bluesky_client.upload_blob(image_data, image_content_type)
+                        images = [{
+                            "blob": blob_result.get("blob", {}),
+                            "alt": text[:500]
+                        }]
+                        post_result = bluesky_client.create_image_post(text, images)
+                    else:
+                        post_result = bluesky_client.post_message(text)
+                    
+                    log_event(
+                        source="scheduler",
+                        event_type="restored_bsky_post_sent",
+                        payload={
+                            "text": text[:100],
+                            "post_uri": post_result.get("uri", "unknown"),
+                            "has_image": image_data is not None
+                        }
+                    )
+                except Exception as e:
+                    log_error("scheduler", e, {
+                        "action": "restore_bsky_post"
+                    })
+        
+        scheduler.register_restore_handler("bsky_schedule_post", restore_bsky_post)
 

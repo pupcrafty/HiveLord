@@ -107,3 +107,4 @@ If the error persists after checking the above:
 
 The improved error handling will show exactly what Bluesky's API is returning, which will help identify the specific issue.
 
+

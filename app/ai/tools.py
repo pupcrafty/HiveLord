@@ -84,7 +84,7 @@ def get_tools() -> list[Dict[str, Any]]:
                         },
                         "when_utc": {
                             "type": "string",
-                            "description": "ISO 8601 datetime string in UTC (e.g., '2024-01-15T14:30:00Z')"
+                            "description": "ISO 8601 datetime string in UTC ending with 'Z' (e.g., '2026-01-06T17:30:00Z'). MUST be a FUTURE datetime relative to the current time provided in the system message. For recurring check-ins, calculate each timestamp relative to the current time (e.g., +2 hours, +4 hours, +6 hours from now)."
                         }
                     },
                     "required": ["message", "when_utc"]
@@ -105,7 +105,7 @@ def get_tools() -> list[Dict[str, Any]]:
                         },
                         "when_utc": {
                             "type": "string",
-                            "description": "ISO 8601 datetime string in UTC (e.g., '2024-01-15T14:30:00Z')"
+                            "description": "ISO 8601 datetime string in UTC ending with 'Z' (e.g., '2026-01-06T17:30:00Z'). MUST be a FUTURE datetime relative to the current time provided in the system message. For recurring check-ins, calculate each timestamp relative to the current time (e.g., +2 hours, +4 hours, +6 hours from now)."
                         },
                         "image_url": {
                             "type": "string",
@@ -126,4 +126,5 @@ def get_tools() -> list[Dict[str, Any]]:
 def get_tool_names() -> list[str]:
     """Get list of allowed tool names for validation."""
     return [tool["function"]["name"] for tool in get_tools()]
+
 
